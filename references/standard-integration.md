@@ -208,6 +208,7 @@ A good standard integration output should usually include:
 
 - stack assumptions
 - product mode
+- executable artifacts such as checklist, payload notes, and implementation TODOs
 - registered-product product and price sourcing when that mode is used
 - non-registered product payload design through `priceDataList` when that mode is used
 - purchase-path branching such as checkout vs customer portal

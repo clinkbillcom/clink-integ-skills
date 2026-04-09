@@ -1,16 +1,17 @@
-# Clink Dev Skill
+# clink-integ-skills
 
 [English](README.md) | 简体中文
 
-Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户接入方案，以及回答 Clink 官方文档相关问题。
+`clink-integ-skills` 是一个模块化的 skill，用于指导 coding agent 完成 Clink 接入、校验接入决策、审查现有方案，以及回答基于官方文档的接入问题。
 
-它围绕三个核心场景构建：
+它围绕四个核心场景构建：
 
 - 商户标准接入
 - 商户 Agent 接入
-- Clink 文档对话
+- 基于文档的接入指导
+- 集成校验与接入工件生成
 
-这个 skill 不复制 Clink 产品文档本身，而是在开发和维护这个 skill 时，把官方文档导出 `https://docs.clinkbill.com/llms-full.txt` 作为参考来源，让 skill 仓库本身聚焦在工作流、任务路由、契约设计和输出质量上。
+这个 skill 不复制 Clink 产品文档本身，而是在开发和维护这个 skill 时，把官方文档导出 `https://docs.clinkbill.com/llms-full.txt` 作为参考来源，让 skill 仓库本身聚焦在工作流、任务路由、校验逻辑、契约设计和输出质量上。它的职责是帮助 coding agent 判断应该如何正确接入，而不是在缺少项目上下文时直接猜测最终代码。
 
 ---
 
@@ -22,6 +23,7 @@ Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户
 - 设计通过 Clink payment skill 的商户 Agent 接入，包括商户 skill 接入，以及商户后端通过 `customer.verify` 支持 email verify webhook
 - 基于 Clink 官方文档回答问题，并提取相关 endpoint、field、webhook 和契约细节
 - 审查商户 Agent 接入场景下的 payment handoff 契约
+- 生成 checklist、contract skeleton、payload 示例和校验报告，帮助 coding agent 在真实项目栈里完成实现
 
 对于商户标准接入，默认范围包括：
 
@@ -32,11 +34,27 @@ Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户
 - 订阅生命周期 webhook 覆盖，以及必要时在回跳后主动同步状态
 - 可选的商户前端通过 JS SDK 接入 embedded form，或通过配置好的链接打开支付流程
 
-对于 Clink 文档对话，默认范围包括：
+对于基于文档的接入指导，默认范围包括：
 
 - 用更易懂的话解释官方文档内容
 - 回答 endpoint、field、webhook 或产品行为问题
 - 判断某个接入设计是否符合文档约束
+
+对于开发者校验请求，默认范围包括：
+
+- 契约校验与整改项
+- webhook 就绪性检查
+- 用于实现交接的接入工件生成
+- 基于文档确认 API 能力是否已被支持
+
+这个 skill 通常应该告诉 coding agent：
+
+- 当前属于哪条接入路径
+- 哪些前置假设必须先确认
+- 哪些字段和契约最关键
+- 哪些 unsupported claim 必须避免
+
+这个 skill 通常不应该在不了解用户真实语言、框架和代码结构时，直接输出最终项目级接入代码。
 
 示例：
 
@@ -56,6 +74,8 @@ Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户
 | `references/retrieval-protocol.md` | 本地文档检索协议 |
 | `references/standard-integration.md` | 商户标准接入工作流 |
 | `references/agent-integration.md` | 商户 Agent 接入工作流 |
+| `references/output-artifacts.md` | 开发者输出工件规范 |
+| `references/validation-workflow.md` | 校验工作流 |
 | `references/review-checklist.md` | 审核清单与质量门槛 |
 
 ---
@@ -68,13 +88,14 @@ Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户
 
 下载后的固定缓存路径是：
 
-- `clink-dev-skill/.cache/official-docs/llms-full.txt`
+- `clink-integ-skills/.cache/official-docs/llms-full.txt`
 
 这个缓存是给 skill 作者和维护者用的，不是 merchant 使用 skill 时的运行时要求。
 
 刷新规则：
 
-- 只有当前任务需要查官方文档时，才先运行 `node scripts/refresh_official_docs.mjs`
+- 对需要查文档的流程，优先统一走 `node scripts/load_official_docs.mjs`
+- 只有在你想显式刷新缓存或查看缓存状态时，再直接运行 `node scripts/refresh_official_docs.mjs`
 - 如果缓存文档超过 7 天未更新，脚本会自动刷新
 - 如果用户明确要求主动更新文档，运行 `node scripts/refresh_official_docs.mjs --force`
 - 如果只想查看当前缓存状态，运行 `node scripts/refresh_official_docs.mjs --status`
@@ -93,17 +114,50 @@ Clink Dev Skill 是一个模块化的 skill，用于设计和审查 Clink 商户
 ### 让你的智能体安装
 
 ```text
-Install Clink Dev Skill: https://github.com/clinkbillcom/clink-dev-skill
+Install clink-integ-skills: https://github.com/clinkbillcom/clink-integ-skills
 ```
 
 ### 手动安装
 
 ```bash
-git clone https://github.com/clinkbillcom/clink-dev-skill.git
-cd clink-dev-skill
+git clone https://github.com/clinkbillcom/clink-integ-skills.git
+cd clink-integ-skills
 ```
 
 默认不需要额外安装运行时依赖。
+
+---
+
+## 工具能力
+
+当你需要的不只是说明文时，可以直接使用：
+
+```bash
+node scripts/load_official_docs.mjs --json
+node scripts/lint_contract.mjs path/to/contract.json
+node scripts/lint_webhook_design.mjs path/to/design.md
+node scripts/generate_guidance_artifacts.mjs --prompt "帮我设计 Clink webhook 接入"
+node scripts/run_skill_runtime.mjs --prompt "Review this payment handoff contract" --json
+```
+
+这些脚本提供：
+
+- 文档门禁
+- 契约校验
+- webhook 设计校验
+- 接入工件生成
+- runtime route 和 docs trace
+
+推荐工作流：
+
+1. 先通过文档门禁加载需要确认的官方文档
+2. 再为目标接入路径生成接入工件
+3. 上线前用校验脚本检查 contract 或 webhook 设计
+
+安全说明：
+
+- 面向开发者的脚本默认不再静默使用测试夹具文档
+- 只有在测试或受控本地模拟时，才使用 `--allow-fixture-fallback`
 
 ---
 
@@ -118,16 +172,26 @@ npm test
 这套测试会校验：
 
 - 结构测试
-- 行为测试
-- 决策测试
+- 快照回归测试
+- 文档门禁测试
+- runtime 测试
+- validator 测试
 
-也可以分别运行三层测试：
+也可以分别运行各层测试：
 
 ```bash
 npm run test:structure
 npm run test:behavior
 npm run test:decision
+npm run test:docs-gate
+npm run test:runtime
+npm run test:contracts
 ```
+
+说明：
+
+- `test:behavior` 和 `test:decision` 更偏快照回归
+- `test:docs-gate`、`test:runtime`、`test:contracts` 会验证可执行行为
 
 用真实模型执行 LLM 测试：
 
@@ -154,6 +218,7 @@ node tests/run_llm_skill_tests.mjs --max-output-tokens 3000
 
 - 模型：`gemini-3-flash-preview`
 - Base URL：`https://generativelanguage.googleapis.com/v1beta/openai`
+- docs root：默认使用 `tests/fixtures/public-docs`，也可通过 `CLINK_DOCS_ROOT` 覆盖
 
 ---
 

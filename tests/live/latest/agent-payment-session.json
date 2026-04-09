@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Route: merchant_agent_integration\n\nAnswer:\nFor a merchant agent integration, your merchant server is responsible for managing the payment business context and coordinating with the Clink payment skill. You should implement the following backend capabilities:\n\n1.  **Session Creation**: Implement logic to call `POST /order/payment-session` when a payment or recharge is required. This requires providing the `customerEmail`, `amount`, and `currency`.\n2.  **Session Querying**: Implement logic to call `GET /order/payment-session/{sessionId}` to retrieve the status or details of an existing agent payment session.\n3.  **Webhook Handling**: Register and implement a handler for the `customer.verify` webhook. Your server must handle these events to verify customer identity during the agent payment flow.\n4.  **Merchant Confirmation**: After the Clink payment skill executes the payment and provides a handoff, your server must run merchant confirmation logic to finalize the business result.\n5.  **Task Recovery**: Support logic to resume the original pending agent task once payment and merchant confirmation are successful.\n\nCoverage:\nPOST /order/payment-session\nGET /order/payment-session/{sessionId}",
+        "extra_content": {
+          "google": {
+            "thought_signature": "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"
+          }
+        },
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1775567350,
+  "id": "9gHVaeaNFoPbvr0PyIO0oQc",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 246,
+    "prompt_tokens": 7600,
+    "prompt_tokens_details": {
+      "cached_tokens": 6123
+    },
+    "total_tokens": 8545
+  }
+}

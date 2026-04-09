@@ -1,0 +1,48 @@
+# Output Artifacts
+
+Use this module when the skill should produce developer-ready artifacts instead of prose-only guidance.
+
+## Standard Integration Artifacts
+
+A strong merchant standard integration output should usually include:
+
+- integration checklist
+- webhook handler checklist
+- merchant order mapping notes
+- implementation TODO list
+- product-mode notes for registered vs non-registered flows
+
+For registered product mode, add:
+
+- product and price sourcing checklist
+
+For non-registered product mode, add:
+
+- inline payload design notes such as `priceDataList`
+
+## Merchant Agent Integration Artifacts
+
+A strong merchant agent integration output should usually include:
+
+- merchant server capability list
+- payment handoff contract skeleton
+- merchant confirmation checklist
+- recovery and resume checklist
+
+## Validation Artifacts
+
+For validation-heavy requests, prefer producing:
+
+- contract validation report
+- webhook design validation report
+- remediation checklist
+- launch-readiness checklist
+
+## Formatting Rule
+
+When an artifact is more useful than prose alone:
+
+- summarize the route and assumptions
+- emit the artifact name clearly
+- include required fields or checklist items explicitly
+- keep unsupported or unconfirmed details marked as not confirmed

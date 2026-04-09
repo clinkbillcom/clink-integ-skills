@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Route: merchant_standard_integration\n\nAnswer: Based on the provided documentation, a public API to create a refund is not confirmed.\n\nAccording to `references/standard-integration.md` and `public-docs/guides/resources/refund.mdx`, refunds are currently managed through the Clink dashboard rather than a public API. The documentation explicitly warns not to assume a public refund-create API exists unless shown in the docs. \n\nThe `api-reference/openapi.json` only provides a retrieval endpoint:\n- `GET /refund/{id}`: Retrieve details of a specific refund.\n\nTo issue a refund, the documentation directs merchants to:\n1. Navigate to the **Transactions** tab in the Clink dashboard.\n2. Locate the target order.\n3. Click the **Refund** button.\n4. Complete and confirm the refund form.\n\nCoverage:\n- not confirmed",
+        "extra_content": {
+          "google": {
+            "thought_signature": "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"
+          }
+        },
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1775567398,
+  "id": "JgLVaZ-tB6mVvr0P6NOb0Q8",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 187,
+    "prompt_tokens": 9764,
+    "prompt_tokens_details": {
+      "cached_tokens": 8170
+    },
+    "total_tokens": 10361
+  }
+}

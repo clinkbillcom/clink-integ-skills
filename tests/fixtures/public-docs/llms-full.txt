@@ -1,0 +1,25 @@
+# Clink Official Docs Export
+
+## Quickstart
+
+Clink supports merchant standard integration and merchant agent integration.
+
+## Integration
+
+Merchant standard integration covers checkout session creation, webhook handling, and refund synchronization.
+
+Merchant agent integration covers `POST /order/payment-session`, `GET /order/payment-session/{sessionId}`, and `WEBHOOK customer.verify`.
+
+## Checkout Session
+
+Use `/checkout/session` to create a checkout session.
+
+## Refund
+
+Refunds are modeled as a lifecycle. The current public docs confirm querying refund details through `GET /refund/{id}`.
+
+No public refund-create API is confirmed in this docs export.
+
+## Webhooks
+
+Webhook implementations should verify `X-Clink-Timestamp` and `X-Clink-Signature`, and must tolerate retries and out-of-order delivery.

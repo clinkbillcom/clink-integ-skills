@@ -158,6 +158,7 @@ A good merchant agent integration output should usually include:
 - merchant skill responsibilities
 - merchant server responsibilities
 - session mode vs direct mode selection
+- developer-ready artifacts such as handoff contract skeleton, confirmation checklist, and recovery notes
 - payment skill dependency model
 - payment handoff contract
 - merchant integration metadata such as `server`, `confirm_tool`, and `confirm_args`

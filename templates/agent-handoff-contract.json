@@ -1,0 +1,15 @@
+{
+  "server": "merchant-server-identifier",
+  "confirm_tool": "confirm_order_after_payment",
+  "confirm_args": {
+    "order_id": "merchant-order-id",
+    "session_id": "optional-session-id",
+    "channel_context": "notify-target-or-thread"
+  },
+  "payment_handoff": {
+    "order_id": "merchant-order-id",
+    "session_id": "optional-session-id",
+    "status": "succeeded",
+    "merchant_reference": "merchant-order-id"
+  }
+}

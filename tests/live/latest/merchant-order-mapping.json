@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Route: merchant_standard_integration\n\nAnswer:\nWhen creating a Clink checkout session, you should map your internal merchant order ID to the `merchantReferenceId` field in the POST Session API request. \n\nAccording to the documentation:\n- **Purpose**: The `merchantReferenceId` is used for **reconciliation** to help you track and link Clink sessions/orders with your internal systems.\n- **Idempotency**: The `merchantReferenceId` is **not an idempotency key**. Clink does not use this field to prevent duplicate sessions; if you call the API multiple times with the same ID, Clink will treat them as distinct sessions. Merchant systems are responsible for implementing their own idempotency and duplicate prevention logic.\n\nCoverage:\nmerchantReferenceId\nreconciliation\nnot an idempotency key",
+        "extra_content": {
+          "google": {
+            "thought_signature": "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"
+          }
+        },
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1775567316,
+  "id": "1AHVafOEB_2dosUPmce1aQ",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 168,
+    "prompt_tokens": 9778,
+    "prompt_tokens_details": {
+      "cached_tokens": 8170
+    },
+    "total_tokens": 10317
+  }
+}

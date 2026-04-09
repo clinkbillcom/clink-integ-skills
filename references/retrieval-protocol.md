@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module defines how `clink-dev-skill` should retrieve facts while the skill is being developed or maintained.
+This module defines how `clink-integ-skills` should retrieve facts while the skill is being developed or maintained.
 
 ## Source Of Truth
 
@@ -18,7 +18,7 @@ This cache path is for skill authors and maintainers. It is not a runtime requir
 
 When the current task needs official docs, run this before reading the cache:
 
-- `node scripts/refresh_official_docs.mjs`
+- `node scripts/load_official_docs.mjs`
 
 This command:
 
@@ -26,6 +26,7 @@ This command:
 - checks the last download time before every use
 - automatically refreshes the cache when it is older than 7 days
 - keeps using the existing cache when it is still within 7 days
+- falls back to stale cache only when refresh fails and a previous cache exists
 
 Do not read or cite `.cache/official-docs/llms-full.txt` before this freshness check step for doc-dependent tasks.
 

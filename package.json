@@ -1,0 +1,24 @@
+{
+  "name": "clink-integ-skills",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:refresh": "node scripts/refresh_official_docs.mjs",
+    "docs:force": "node scripts/refresh_official_docs.mjs --force",
+    "docs:status": "node scripts/refresh_official_docs.mjs --status",
+    "docs:load": "node scripts/load_official_docs.mjs --json",
+    "lint:contract": "node scripts/lint_contract.mjs",
+    "lint:webhook": "node scripts/lint_webhook_design.mjs",
+    "artifacts": "node scripts/generate_guidance_artifacts.mjs",
+    "runtime": "node scripts/run_skill_runtime.mjs --json",
+    "test": "node tests/run_skill_tests.mjs",
+    "test:structure": "node tests/run_structure_tests.mjs",
+    "test:behavior": "node tests/run_behavior_tests.mjs",
+    "test:decision": "node tests/run_decision_tests.mjs",
+    "test:docs-gate": "node tests/run_docs_gate_tests.mjs",
+    "test:runtime": "node tests/run_skill_runtime_tests.mjs",
+    "test:contracts": "node tests/run_skill_contract_tests.mjs",
+    "test:llm": "node tests/run_llm_skill_tests.mjs"
+  }
+}

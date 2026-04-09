@@ -50,3 +50,4 @@ This file is for final review and self-check. It is not the primary workflow doc
 - is the main `SKILL.md` concise
 - are detailed workflows moved into reference modules
 - are English and Chinese docs aligned when both are updated
+- do validation-heavy answers point to generated artifacts or lint reports when that would help the developer more than prose

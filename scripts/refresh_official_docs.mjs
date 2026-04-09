@@ -1,18 +1,4 @@
-import fs from "fs";
-import path from "path";
-import https from "https";
-import { fileURLToPath } from "url";
-
-const SKILL_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  ".."
-);
-
-const DOCS_URL = "https://docs.clinkbill.com/llms-full.txt";
-const CACHE_DIR = path.join(SKILL_ROOT, ".cache", "official-docs");
-const DOCS_PATH = path.join(CACHE_DIR, "llms-full.txt");
-const META_PATH = path.join(CACHE_DIR, "llms-full.meta.json");
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+import { DEFAULT_DOCS_URL, formatDate, getCacheStatus, refreshOfficialDocs } from "../lib/docs-runtime.mjs";
 
 function parseArgs(argv) {
   const args = new Set(argv.slice(2));
@@ -20,162 +6,58 @@ function parseArgs(argv) {
     force: args.has("--force"),
     printPath: args.has("--print-path"),
     statusOnly: args.has("--status"),
+    json: args.has("--json"),
   };
-}
-
-function ensureCacheDir() {
-  fs.mkdirSync(CACHE_DIR, { recursive: true });
-}
-
-function readMeta() {
-  try {
-    return JSON.parse(fs.readFileSync(META_PATH, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function getLastUpdatedAt(meta) {
-  if (meta?.downloadedAt) {
-    const parsed = Date.parse(meta.downloadedAt);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-
-  try {
-    return fs.statSync(DOCS_PATH).mtimeMs;
-  } catch {
-    return null;
-  }
-}
-
-function getStatus() {
-  const meta = readMeta();
-  const lastUpdatedAt = getLastUpdatedAt(meta);
-  const exists = fs.existsSync(DOCS_PATH);
-
-  if (!exists || !lastUpdatedAt) {
-    return {
-      exists,
-      stale: true,
-      lastUpdatedAt: null,
-      ageMs: null,
-    };
-  }
-
-  const ageMs = Date.now() - lastUpdatedAt;
-  return {
-    exists,
-    stale: ageMs > ONE_WEEK_MS,
-    lastUpdatedAt,
-    ageMs,
-  };
-}
-
-function download(url) {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, (response) => {
-        if (
-          response.statusCode &&
-          response.statusCode >= 300 &&
-          response.statusCode < 400 &&
-          response.headers.location
-        ) {
-          resolve(download(response.headers.location));
-          return;
-        }
-
-        if (response.statusCode !== 200) {
-          reject(
-            new Error(`Failed to download docs: HTTP ${response.statusCode}`)
-          );
-          response.resume();
-          return;
-        }
-
-        response.setEncoding("utf8");
-        let body = "";
-        response.on("data", (chunk) => {
-          body += chunk;
-        });
-        response.on("end", () => {
-          resolve(body);
-        });
-      })
-      .on("error", reject);
-  });
-}
-
-async function refreshDocs() {
-  const contents = await download(DOCS_URL);
-  const downloadedAt = new Date().toISOString();
-
-  ensureCacheDir();
-  fs.writeFileSync(DOCS_PATH, contents, "utf8");
-  fs.writeFileSync(
-    META_PATH,
-    JSON.stringify(
-      {
-        sourceUrl: DOCS_URL,
-        downloadedAt,
-        cachePath: DOCS_PATH,
-      },
-      null,
-      2
-    ),
-    "utf8"
-  );
-
-  return downloadedAt;
-}
-
-function formatDate(timestamp) {
-  if (!timestamp) return "never";
-  return new Date(timestamp).toISOString();
 }
 
 async function main() {
   const args = parseArgs(process.argv);
-  const status = getStatus();
+  const sourceUrl = process.env.CLINK_DOCS_URL || DEFAULT_DOCS_URL;
+  const status = getCacheStatus();
 
   if (args.printPath) {
-    console.log(DOCS_PATH);
+    console.log(status.docsPath);
     return;
   }
 
   if (args.statusOnly) {
-    console.log(
-      JSON.stringify(
-        {
-          sourceUrl: DOCS_URL,
-          cachePath: DOCS_PATH,
-          exists: status.exists,
-          stale: status.stale,
-          lastUpdatedAt: formatDate(status.lastUpdatedAt),
-          ttlDays: 7,
-        },
-        null,
-        2
-      )
-    );
+    const payload = {
+      sourceUrl,
+      cachePath: status.docsPath,
+      exists: status.exists,
+      stale: status.stale,
+      lastUpdatedAt: formatDate(status.lastUpdatedAt),
+      ttlDays: status.ttlDays,
+    };
+    console.log(args.json ? JSON.stringify(payload, null, 2) : JSON.stringify(payload, null, 2));
     return;
   }
 
   const shouldRefresh = args.force || status.stale;
-
   if (!shouldRefresh) {
-    console.log(
-      `Official docs cache is fresh: ${DOCS_PATH} (updated ${formatDate(
-        status.lastUpdatedAt
-      )})`
-    );
+    const payload = {
+      sourceUrl,
+      cachePath: status.docsPath,
+      action: "cache",
+      exists: status.exists,
+      stale: status.stale,
+      lastUpdatedAt: formatDate(status.lastUpdatedAt),
+    };
+    if (args.json) console.log(JSON.stringify(payload, null, 2));
+    else console.log(`Official docs cache is fresh: ${status.docsPath} (updated ${formatDate(status.lastUpdatedAt)})`);
     return;
   }
 
-  const downloadedAt = await refreshDocs();
-  console.log(
-    `Official docs cache updated: ${DOCS_PATH} (updated ${downloadedAt})`
-  );
+  const refreshed = await refreshOfficialDocs({ sourceUrl });
+  const payload = {
+    sourceUrl,
+    cachePath: refreshed.docsPath,
+    action: "refresh",
+    refreshed: true,
+    downloadedAt: refreshed.downloadedAt,
+  };
+  if (args.json) console.log(JSON.stringify(payload, null, 2));
+  else console.log(`Official docs cache updated: ${refreshed.docsPath} (updated ${refreshed.downloadedAt})`);
 }
 
 main().catch((error) => {

@@ -1,0 +1,94 @@
+{
+  "cases": [
+    {
+      "id": "decision-ask-language-without-code-context",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me implement Clink checkout session creation on my backend.",
+      "must_include": [
+        ["backend language", "language"],
+        ["framework", "frameworks"]
+      ],
+      "must_not_include": [
+        "defaulting to Node.js",
+        "defaulting to TypeScript"
+      ]
+    },
+    {
+      "id": "decision-use-existing-node-context",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me implement Clink checkout session creation in this service.",
+      "context_blocks": [
+        [
+          "provided package.json",
+          "{\n  \"name\": \"merchant-app\",\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"express\": \"^5.0.0\"\n  }\n}"
+        ]
+      ],
+      "must_include": [
+        ["node.js", "node js", "express"],
+        "checkout session"
+      ],
+      "must_not_include": [
+        "what backend language are you using"
+      ]
+    },
+    {
+      "id": "decision-design-only-no-language-blocker",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Brainstorm a Clink standard integration architecture for checkout, webhook, and refund.",
+      "must_include": [
+        "checkout",
+        "webhook",
+        "refund"
+      ],
+      "must_not_include": [
+        "please specify your backend language before i can help"
+      ]
+    },
+    {
+      "id": "decision-review-stays-review",
+      "scenario": "review",
+      "acceptable_routes": ["review", "merchant_standard_integration"],
+      "prompt": "Review this Clink webhook design for missing requirements and risks.",
+      "context_blocks": [
+        [
+          "provided design snippet",
+          "We will receive order events on /webhooks/clink and update order state. We have not added signature verification yet."
+        ]
+      ],
+      "must_include": [
+        ["review", "risk", "missing requirements"],
+        "signature"
+      ],
+      "must_not_include": [
+        "full implementation code"
+      ]
+    },
+    {
+      "id": "decision-compare-not-merge",
+      "scenario": "comparison",
+      "prompt": "Compare a merchant standard integration and a merchant agent integration for the same product.",
+      "must_include": [
+        ["compare", "comparison", "difference"],
+        ["merchant standard integration", "standard integration"],
+        ["merchant agent integration", "agent integration"]
+      ],
+      "must_not_include": [
+        "one single flow for both without distinction"
+      ]
+    },
+    {
+      "id": "decision-agent-separates-responsibilities",
+      "scenario": "merchant_agent_integration",
+      "prompt": "Design a merchant agent integration using Clink payment skill and explain who does what.",
+      "must_include": [
+        "merchant skill",
+        "merchant server",
+        "payment skill"
+      ],
+      "must_not_include": [
+        "checkout redirect is enough"
+      ]
+    }
+  ]
+}
+

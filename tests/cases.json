@@ -1,0 +1,203 @@
+{
+  "cases": [
+    {
+      "id": "standard-integration-design",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me design a Clink standard integration for checkout, webhook, and refund.",
+      "must_include": [
+        "checkout session",
+        "webhook",
+        "refund"
+      ],
+      "must_include_any": [
+        ["local docs", "local documentation", "provided local clink docs", "source of truth", "based on the current local documentation", "based on the clink documentation", "official clink documentation", "current documentation", "clink documentation"]
+      ],
+      "must_not_include": [
+        "payment skill dependency as the core path"
+      ]
+    },
+    {
+      "id": "standard-integration-no-code-context",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me implement Clink checkout session creation on my backend.",
+      "must_include": [
+        "backend language",
+        "framework"
+      ],
+      "must_not_include": [
+        "defaulting to Node.js",
+        "defaulting to TypeScript"
+      ]
+    },
+    {
+      "id": "registered-product-mode",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me implement a checkout session using products already created in Clink dashboard.",
+      "must_include": [
+        "registered product mode",
+        "productId",
+        "priceId"
+      ],
+      "must_not_include": [
+        "inventing productId",
+        "inventing priceId"
+      ]
+    },
+    {
+      "id": "non-registered-product-mode",
+      "scenario": "merchant_standard_integration",
+      "prompt": "I do not want to create products in the Clink dashboard. Help me create checkout sessions directly from my order data.",
+      "must_include": [
+        "non-registered product mode",
+        ["priceDataList", "inline order data", "inline items", "pass your order data inline"]
+      ],
+      "must_not_include": [
+        "requiring productId",
+        "requiring priceId"
+      ]
+    },
+    {
+      "id": "merchant-order-mapping",
+      "scenario": "merchant_standard_integration",
+      "prompt": "How should I map my merchant order ID when creating a Clink checkout session?",
+      "must_include": [
+        "merchantReferenceId",
+        ["reconciliation", "reconciling", "tracking and reconciliation"],
+        ["not an idempotency key", "does not maintain idempotency", "not treat merchantreferenceid as an idempotency key", "does not use merchantreferenceid as an idempotency key"]
+      ],
+      "must_not_include": [
+        "Clink-side idempotency"
+      ]
+    },
+    {
+      "id": "webhook-setup",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me implement Clink webhook support in my merchant backend.",
+      "must_include": [
+        ["Merchant Dashboard > Developers > Webhooks", "Developers > Webhooks", "Dashboard > Developers > Webhooks"],
+        ["subscribe to required events", "select the event types", "subscribe to", "select the events you wish to monitor", "select the event types to monitor"],
+        ["register webhook endpoint", "register an https endpoint", "enter your https endpoint", "register your https endpoint", "register your endpoint"],
+        ["obtain webhook signing key", "copy the webhook signing key", "signing key", "webhook signing key", "copy the signing key"],
+        "X-Clink-Timestamp",
+        "X-Clink-Signature",
+        "idempotency",
+        ["retry", "retries", "attempts delivery up to 10 times"],
+        "out-of-order"
+      ],
+      "must_not_include": [
+        "only frontend redirect handling"
+      ]
+    },
+    {
+      "id": "refund-capability",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Help me design the refund part of my Clink integration.",
+      "must_include": [
+        ["refund lifecycle", "modeled as a lifecycle", "refunds are modeled as a lifecycle", "designed as a lifecycle", "lifecycle rather than a single api call"],
+        ["dashboard-issued refunds", "processed through the clink dashboard", "refunds are initiated through the clink dashboard", "manual process performed through the clink dashboard", "managed through the merchant dashboard", "initiated manually through the clink dashboard"],
+        ["refund querying", "get /refund/{id}", "retrieve details for an existing refund", "querying"],
+        ["insufficient balance", "sufficient funds", "balance is insufficient", "refund requests will be rejected if the balance is insufficient"]
+      ],
+      "must_not_include": [
+        "public refund-create API"
+      ]
+    },
+    {
+      "id": "merchant-agent-integration-design",
+      "scenario": "merchant_agent_integration",
+      "prompt": "Help me design a merchant agent integration where my merchant skill uses Clink payment skill for payment and handoff.",
+      "must_include": [
+        "merchant skill",
+        "merchant server",
+        "payment skill",
+        "payment handoff",
+        ["merchant confirmation", "business confirmation", "confirm the business result", "confirmation logic"],
+        ["task resume", "task resumption", "resume the original task", "resume the pending task", "resumes the pending task", "recover", "recovery"]
+      ],
+      "must_not_include": [
+        "plain hosted checkout integration"
+      ]
+    },
+    {
+      "id": "agent-payment-session",
+      "scenario": "merchant_agent_integration",
+      "prompt": "What should my merchant server implement for agent payment session support?",
+      "must_include": [
+        "POST /order/payment-session",
+        ["GET /order/payment-session/{sessionId}", "query session", "querying payment sessions", "retrieve the status and details", "retrieve payment status"]
+      ],
+      "must_not_include": [
+        "replacing merchant server responsibilities entirely with payment skill"
+      ]
+    },
+    {
+      "id": "customer-verify-webhook",
+      "scenario": "merchant_agent_integration",
+      "prompt": "How should my merchant backend handle customer email verification in the agent payment flow?",
+      "must_include": [
+        ["WEBHOOK customer.verify", "customer.verify"],
+        ["merchant server webhook handling", "merchant server", "handle customer.verify on the merchant server", "your backend is responsible", "your backend handles", "your server should"],
+        ["email verification", "verify a customer's identity", "customer's identity", "confirm a customer's identity", "validate customer identities", "customer verification", "customer is valid", "customer associated with the payment session is valid"],
+        ["validate customer details", "validate customer", "verify the customer", "verification is required", "to be verified", "identity"]
+      ],
+      "must_not_include": [
+        "normal checkout redirect event"
+      ]
+    },
+    {
+      "id": "webhook-review",
+      "scenario": "review",
+      "acceptable_routes": ["review", "merchant_standard_integration"],
+      "prompt": "Review this Clink webhook design for gaps and risks.",
+      "must_include": [
+        "signature",
+        "idempotency",
+        ["retry", "retries", "retry logic", "delivery up to 10 times"],
+        ["out-of-order", "out of order", "not guaranteed to arrive in order", "arriving in a specific order"],
+        ["dashboard configuration", "webhook registration", "register your https endpoint", "developers > webhooks", "signing key obtained from the clink dashboard", "clink dashboard"]
+      ],
+      "must_not_include": [
+        "only style feedback"
+      ]
+    },
+    {
+      "id": "payment-handoff-review",
+      "scenario": "review",
+      "acceptable_routes": ["review", "merchant_agent_integration"],
+      "prompt": "Review this payment handoff contract between my merchant skill and Clink payment skill.",
+      "must_include": [
+        ["responsibility boundaries", "ownership & responsibilities", "responsibilities"],
+        ["merchant confirmation ownership", "merchant confirmation", "business confirmation", "confirmation logic"],
+        ["payment handoff ownership", "payment handoff"],
+        ["resume logic", "resume", "task recovery", "task resumption", "recovery"]
+      ],
+      "must_not_include": [
+        "one responsibility layer"
+      ]
+    },
+    {
+      "id": "mixed-request",
+      "scenario": "comparison",
+      "prompt": "Help me compare a standard merchant integration and a merchant agent integration for the same product.",
+      "must_include": [
+        ["separation between the two paths", "difference", "differences", "compare", "comparison"],
+        ["backend responsibilities", "merchant server", "backend", "comparison"]
+      ],
+      "must_not_include": [
+        "one undifferentiated design"
+      ]
+    },
+    {
+      "id": "unsupported-detail",
+      "scenario": "merchant_standard_integration",
+      "prompt": "Show me the public API to create a refund in Clink.",
+      "must_include": [
+        ["not confirmed", "there is no public api", "there is no confirmed public api", "no public api", "cannot create a refund via api", "manual process performed through the clink dashboard"]
+      ],
+      "must_not_include": [
+        "invented endpoint names",
+        "invented request payloads"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Route: merchant_standard_integration\n\nAnswer:\nTo implement a checkout session using products already created in the Clink dashboard, you will use the **Registered Product Mode**. This allows you to reference your pre-configured catalog directly via the API.\n\n### 1. Identify Your Stack\nPlease confirm your backend language (e.g., Node.js, Python, Java) for specific code implementation. Since it is not confirmed, the examples below use standard `curl` commands based on Clink documentation.\n\n### 2. Create the Checkout Session\nWhen using registered products, you must provide the `productId` and `priceId` obtained from your Clink Dashboard.\n\n**Endpoint:** `POST https://api.clinkbill.com/api/checkout/session` (Production)\n\n**Request Example:**\n```json\ncurl --location --request POST 'https://api.clinkbill.com/api/checkout/session' \\\n--header 'X-Timestamp: ${currentMillisecondsTimestamp}' \\\n--header 'X-API-Key: ${sk_key}' \\\n--header 'Content-Type: application/json' \\\n--data-raw '{\n    \"customerEmail\": \"customer@example.com\",\n    \"originalAmount\": 29.99,\n    \"originalCurrency\": \"USD\",\n    \"priceId\": \"price_12345\",\n    \"productId\": \"prd_67890\",\n    \"merchantReferenceId\": \"your_internal_order_id\"\n}'\n```\n\n**Key Implementation Rules:**\n- **Product Details:** In Registered Product Mode, you do not need to provide `priceDataList`; Clink retrieves the name, icon, and pricing from your dashboard configuration.\n- **Merchant Reference:** Use `merchantReferenceId` to map the Clink session to your internal order. Note that this is for reconciliation and is **not** an idempotency key.\n- **Authentication:** Every request requires an `X-API-Key` and a dynamic `X-Timestamp` (within a two-minute window).\n\n### 3. Webhook Integration\nTo synchronize the payment status with your backend, you must configure webhooks in the **Merchant Dashboard > Developers > Webhooks**.\n\n- **Subscription:** Subscribe to `session.complete` and `session.expired` events.\n- **Verification:** Your server must verify the `X-Clink-Signature` using your signing key and the `X-Clink-Timestamp`. \n- **Processing:** Ensure your endpoint handles retries, out-of-order delivery, and implements its own idempotency logic.\n\n### 4. Refund Handling\nCurrently, refunds should be managed as a lifecycle. You can issue refunds via the Clink Dashboard under the **Transactions** tab. Ensure your webhook handler is also subscribed to `refund` events to synchronize your local database when a refund is processed.\n\nCoverage:\n- registered product mode\n- productId\n- priceId",
+        "extra_content": {
+          "google": {
+            "thought_signature": "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"
+          }
+        },
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1775567302,
+  "id": "xgHVaczRBryavr0P44bcwAM",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 628,
+    "prompt_tokens": 9774,
+    "prompt_tokens_details": {
+      "cached_tokens": 8170
+    },
+    "total_tokens": 10895
+  }
+}

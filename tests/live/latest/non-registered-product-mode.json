@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "Route: merchant_standard_integration\n\nAnswer:\nTo create checkout sessions without pre-configuring products in the Clink dashboard, you should use the **non-registered product mode**. In this mode, you provide the item details directly in the API request using the `priceDataList` field.\n\n### Implementation Details\nWhen calling the `POST /api/checkout/session` endpoint, you must include the following:\n\n1.  **Product Details**: Use the `priceDataList` array to define the name, quantity, and unit amount for your items.\n2.  **Order Totals**: Provide the `originalAmount` and `originalCurrency` representing the total value.\n3.  **Customer Info**: Provide the `customerEmail`. If the customer doesn't exist, Clink will create a profile automatically.\n4.  **Headers**: Include `X-API-Key` (your Secret Key) and `X-Timestamp` (current milliseconds).\n\n### Example Request Payload\n```json\n{\n    \"customerEmail\": \"customer@example.com\",\n    \"originalAmount\": 20.00,\n    \"originalCurrency\": \"USD\",\n    \"priceDataList\": [\n        {\n            \"name\": \"Custom Order Item\",\n            \"quantity\": 1,\n            \"unitAmount\": 20.00,\n            \"currency\": \"USD\"\n        }\n    ]\n}\n```\n\n### Key Considerations\n- **Reconciliation**: Use the `merchantReferenceId` field to map the Clink session to your internal order ID. Note that this is not an idempotency key.\n- **Webhooks**: You should still subscribe to `session.complete` via the Developers tab in the dashboard to synchronize order status to your backend.\n- **Environment**: Use `https://uat-api.clinkbill.com` for testing and `https://api.clinkbill.com` for production.\n\nCoverage:\nnon-registered product mode\npriceDataList",
+        "extra_content": {
+          "google": {
+            "thought_signature": "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"
+          }
+        },
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1775567310,
+  "id": "zgHVafKzKv-1vr0P5pu40AE",
+  "model": "gemini-3-flash-preview",
+  "object": "chat.completion",
+  "usage": {
+    "completion_tokens": 425,
+    "prompt_tokens": 9783,
+    "prompt_tokens_details": {
+      "cached_tokens": 8170
+    },
+    "total_tokens": 10641
+  }
+}

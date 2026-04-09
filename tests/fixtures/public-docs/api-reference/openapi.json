@@ -1,0 +1,71 @@
+{
+  "openapi": "3.1.0",
+  "paths": {
+    "/checkout/session": {
+      "post": {
+        "summary": "Create checkout session"
+      }
+    },
+    "/checkout/session/{id}": {
+      "get": {
+        "summary": "Get checkout session"
+      }
+    },
+    "/refund/{id}": {
+      "get": {
+        "summary": "Get refund"
+      }
+    },
+    "/order/payment-session": {
+      "post": {
+        "summary": "Create agent payment session"
+      }
+    },
+    "/order/payment-session/{sessionId}": {
+      "get": {
+        "summary": "Get agent payment session"
+      }
+    }
+  },
+  "webhooks": {
+    "order": {
+      "post": {
+        "summary": "Order webhook"
+      }
+    },
+    "refund": {
+      "post": {
+        "summary": "Refund webhook"
+      }
+    },
+    "session": {
+      "post": {
+        "summary": "Session webhook"
+      }
+    },
+    "customer.verify": {
+      "post": {
+        "summary": "Customer verify webhook"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentChargeSessionBo": {
+        "type": "object"
+      },
+      "AgentChargeSessionCreateVo": {
+        "type": "object"
+      },
+      "AgentChargeSessionVo": {
+        "type": "object"
+      },
+      "EventCustomerVerifyVo": {
+        "type": "object"
+      },
+      "CustomerVerifyDataVo": {
+        "type": "object"
+      }
+    }
+  }
+}
