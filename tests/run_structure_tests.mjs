@@ -38,7 +38,8 @@ const requiredFiles = [
   "tests/run_skill_tests.mjs",
   "tests/run_llm_skill_tests.mjs",
   "tests/fixtures/public-docs/llms-full.txt",
-  "tests/fixtures/public-docs/api-reference/openapi.json"
+  "tests/fixtures/public-docs/api-reference/openapi.json",
+  "references/environment-strategy.md"
 ];
 
 const moduleExpectations = [
@@ -52,7 +53,9 @@ const moduleExpectations = [
       "merchantReferenceId",
       "customer.verify",
       "node scripts/load_official_docs.mjs",
-      "guidance artifacts"
+      "guidance artifacts",
+      "sandbox",
+      "production"
     ]
   },
   {
@@ -118,20 +121,35 @@ const moduleExpectations = [
     ]
   },
   {
+    file: "references/validation-workflow.md",
+    contains: [
+      "lint_contract",
+      "lint_webhook_design",
+      "generate_guidance_artifacts",
+      "Production Validation Gate",
+      "Sandbox Fallback"
+    ]
+  },
+  {
     file: "references/output-artifacts.md",
     contains: [
       "integration checklist",
       "payment handoff contract skeleton",
       "contract validation report",
-      "launch-readiness checklist"
+      "launch-readiness checklist",
+      "production promotion plan",
+      "base URL"
     ]
   },
   {
-    file: "references/validation-workflow.md",
+    file: "references/environment-strategy.md",
     contains: [
-      "lint_contract",
-      "lint_webhook_design",
-      "generate_guidance_artifacts"
+      "sandbox",
+      "production",
+      "uat",
+      "prod",
+      "https://uat-api.clinkbill.com",
+      "https://api.clinkbill.com"
     ]
   }
 ];

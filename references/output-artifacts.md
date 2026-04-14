@@ -38,6 +38,16 @@ For validation-heavy requests, prefer producing:
 - remediation checklist
 - launch-readiness checklist
 
+## Production Promotion Artifacts
+
+For production promotion requests where validation passes, produce:
+
+- production promotion plan describing the transition from sandbox to production
+- launch readiness checklist summarizing passed checks, warnings, and go-live prerequisites
+- environment-specific configuration changes
+
+These artifacts are only generated after the production validation gate passes.
+
 ## Formatting Rule
 
 When an artifact is more useful than prose alone:
@@ -46,3 +56,4 @@ When an artifact is more useful than prose alone:
 - emit the artifact name clearly
 - include required fields or checklist items explicitly
 - keep unsupported or unconfirmed details marked as not confirmed
+- all generated code must use the resolved base URL for the current target environment

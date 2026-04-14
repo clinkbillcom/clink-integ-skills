@@ -121,9 +121,13 @@ After drafting the answer, review it with:
 - for agent integration, separate merchant skill, merchant server, and payment skill responsibilities
 - when the user asks for developer help, prefer producing executable artifacts such as checklists, sample payloads, contract skeletons, and validation reports
 - for validation tasks, prefer `node scripts/lint_contract.mjs`, `node scripts/lint_webhook_design.mjs`, and `node scripts/generate_guidance_artifacts.mjs`
+- resolve the target environment before generating any code or configuration; use the resolved base URL in all generated code
 
 ## Hard Rules
 
+- default all generated code and integration guidance to sandbox environment unless the user explicitly requests production
+- use only "sandbox" and "production" as user-facing environment terms; do not expose internal naming such as "uat" or "prod" unless the output specifically targets developers who need the internal mapping
+- do not generate production rollout guidance or production base URLs before the production validation gate completes successfully
 - if the current task needs official docs, do not read or cite the cached official docs before running the freshness check command
 - running `node scripts/load_official_docs.mjs` means: use cache if it is within 7 days, refresh only if missing or older than 7 days, and fall back to stale cache only when refresh fails
 - do not mix merchant standard integration and merchant agent integration unless the user explicitly wants both
@@ -142,3 +146,4 @@ After drafting the answer, review it with:
 - `references/output-artifacts.md`
 - `references/validation-workflow.md`
 - `references/review-checklist.md`
+- `references/environment-strategy.md`

@@ -1,7 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { getSkillRoot } from "../lib/docs-runtime.mjs";
-import { defaultDocsFallback, runSkillRuntime } from "../lib/skill-runtime.mjs";
+import { defaultDocsFallback, detectEnvironment, detectRoute, runSkillRuntime } from "../lib/skill-runtime.mjs";
+import { GATED_PRODUCTION_ROUTES } from "../lib/runtime-machine.mjs";
 
 function parseArgs(argv) {
   const values = argv.slice(2);
@@ -11,6 +12,8 @@ function parseArgs(argv) {
     validationFile: null,
     docsSource: process.env.CLINK_DOCS_URL || undefined,
     docsFallbackSource: process.env.CLINK_DOCS_FALLBACK_PATH || null,
+    skipValidation: values.includes("--skip-validation"),
+    confirmUnvalidatedProduction: values.includes("--confirm-unvalidated-production"),
     allowFixtureFallback: values.includes("--allow-fixture-fallback"),
     json: values.includes("--json"),
   };
@@ -36,6 +39,26 @@ async function main() {
     });
   }
 
+  const requestedEnvironment = detectEnvironment({
+    prompt: options.prompt,
+    contextBlocks,
+  });
+  const route = detectRoute({
+    prompt: options.prompt,
+    contextBlocks,
+  });
+  const requiresExplicitUnvalidatedConfirmation =
+    requestedEnvironment === "production" &&
+    GATED_PRODUCTION_ROUTES.includes(route);
+
+  if (
+    options.skipValidation &&
+    requiresExplicitUnvalidatedConfirmation &&
+    !options.confirmUnvalidatedProduction
+  ) {
+    throw new Error("--skip-validation requires --confirm-unvalidated-production");
+  }
+
   const validationInput = options.validationFile ? fs.readFileSync(options.validationFile, "utf8") : null;
   const payload = await runSkillRuntime({
     prompt: options.prompt,
@@ -43,6 +66,7 @@ async function main() {
     docsSource: options.docsSource,
     docsFallbackSource: options.docsFallbackSource || (options.allowFixtureFallback ? defaultDocsFallback(getSkillRoot(import.meta.url)) : null),
     validationInput,
+    skipValidation: options.skipValidation,
   });
 
   if (options.json) {
@@ -50,18 +74,38 @@ async function main() {
     return;
   }
 
+  printHumanReadablePayload(payload);
+}
+
+function printHumanReadablePayload(payload) {
   console.log(`Route: ${payload.route}`);
   console.log(`Route confidence: ${payload.routeConfidence}`);
-  console.log(`Docs gate: ${payload.docsGateInvoked ? payload.docsTrace.action : "skipped"}`);
-  if (payload.questions.length > 0) {
+  console.log(`Environment: ${payload.environment?.targetEnvironment ?? "unknown"}`);
+  console.log(`Base URL: ${payload.environment?.baseUrl ?? "unknown"}`);
+  if (payload.productionValidation) {
+    const validationStatus = payload.productionValidation.passed
+      ? "PASSED"
+      : payload.productionValidation.skipped
+        ? "SKIPPED"
+        : "FAILED";
+    console.log(`Production validation: ${validationStatus}`);
+  } else {
+    console.log("Production validation: not run");
+  }
+  const docsGateAction = payload.docsGateInvoked ? payload.docsTrace?.action ?? "unknown" : "skipped";
+  console.log(`Docs gate: ${docsGateAction}`);
+  if (payload.runtimeState) {
+    console.log(`Runtime state: ${payload.runtimeState.stage ?? "unknown"} (resolved ${payload.runtimeState.resolvedEnvironment ?? "unknown"}, promotion ${payload.runtimeState.promotionStatus ?? "unknown"})`);
+  }
+  if (Array.isArray(payload.questions) && payload.questions.length > 0) {
     console.log("\nQuestions:");
     for (const question of payload.questions) console.log(`- ${question}`);
   }
-  if (payload.artifacts.length > 0) {
+  if (Array.isArray(payload.artifacts) && payload.artifacts.length > 0) {
     console.log("\nArtifacts:");
     for (const artifact of payload.artifacts) console.log(`- ${artifact.name}: ${artifact.summary}`);
   }
-  if (payload.notes.length > 0) {
+  if (Array.isArray(payload.notes) && payload.notes.length > 0) {
     console.log("\nNotes:");
     for (const note of payload.notes) console.log(`- ${note}`);
   }
