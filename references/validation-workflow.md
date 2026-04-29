@@ -4,12 +4,12 @@ Use this module when the task is about checking readiness, validating integratio
 
 ## Contract Validation
 
-For merchant agent handoff validation:
+For merchant skill payment handoff validation:
 
-1. confirm the flow is merchant agent integration rather than standard checkout
+1. confirm the flow is merchant skill for generic agent integration or merchant skill for OpenClaw integration rather than standard integration
 2. validate merchant integration metadata such as `server`, `confirm_tool`, and `confirm_args`
 3. validate the payment handoff payload shape
-4. confirm ownership boundaries across merchant skill, merchant server, and payment skill
+4. confirm ownership boundaries across merchant skill, merchant server, agent runtime or adapter when present, and payment skill
 5. emit remediation items for missing controls
 
 Prefer:
@@ -18,7 +18,7 @@ Prefer:
 
 ## Webhook Validation
 
-For merchant standard webhook validation:
+For standard integration webhook validation:
 
 1. confirm dashboard subscription scope
 2. confirm endpoint registration
@@ -51,7 +51,7 @@ When the detected environment is `production`, run these checks before generatin
 ### Scripted Checks
 
 1. **Contract validation** (agent integrations only): run `node scripts/lint_contract.mjs` on the handoff contract
-2. **Webhook validation** (standard integrations only): run `node scripts/lint_webhook_design.mjs` on the webhook design
+2. **Webhook validation** (standard integration only): run `node scripts/lint_webhook_design.mjs` on the webhook design
 
 ### Semantic Checks
 

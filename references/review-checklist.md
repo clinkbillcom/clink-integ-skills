@@ -1,6 +1,6 @@
 # Review Checklist
 
-Use this checklist after drafting a standard integration plan, an agent integration plan, or a doc-based answer.
+Use this checklist after drafting a standard integration plan, a merchant skill for generic agent integration plan, a merchant skill for OpenClaw integration plan, or a doc-based answer.
 
 This file is for final review and self-check. It is not the primary workflow document.
 
@@ -11,7 +11,7 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does the output avoid inventing undocumented behavior
 - is the scenario routing correct
 
-## Merchant Standard Integration Checks
+## Standard Integration Checks
 
 - did the design identify the backend language or ask for it when needed
 - did the design clarify registered vs non-registered product mode
@@ -30,9 +30,10 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does the design clearly separate payment confirmation from merchant fulfillment when downstream delivery exists
 - does refund handling describe lifecycle behavior instead of assuming unsupported create APIs
 
-## Merchant Agent Integration Checks
+## Merchant Skill for OpenClaw Integration Checks
 
-- does the design clearly distinguish merchant skill from payment skill
+- does the design use `openclaw-payment-skills` for the OpenClaw payment skill path
+- does the design clearly distinguish merchant skill from `openclaw-payment-skills`
 - does it define merchant server responsibilities
 - does it include agent payment session creation/querying
 - does it clarify whether the flow is session mode or direct mode
@@ -43,6 +44,32 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does it separate payment-layer success from merchant-layer confirmation result
 - does it call or describe merchant confirmation exactly once per payment result unless retry is explicitly required
 - does it define merchant confirmation and task resume behavior
+
+## Merchant Skill for Generic Agent Integration Checks
+
+- does the design identify that the runtime is not OpenClaw when taking the merchant skill for generic agent path
+- does it define merchant skill or merchant tool responsibilities before delegating to the generic agent runtime or adapter
+- does the design use `agent-payment-skills` / `clink-payment-skill` as the generic agent payment skill
+- does it account for `clink-cli` JSON output and exit code handling
+- does it require Node.js >= 20 and `clink-cli` installation before payment operations
+- does it avoid automatic `wallet init` during payment and handle exit code `3` or `4` as setup/auth recovery
+- does it require payment-method freshness through `card binding-link` instead of trusting `card list` cache alone
+- does it prevent `customerApiKey` exposure and require `CLINK_CUSTOMER_API_KEY` piping for customer API key configuration
+- does it use `--dry-run` for preview or input verification requests
+- does it define `clink-cli pay` status handling for status `1`, status `3`, status `4`, and status `6`
+- does it require explicit refund request and original `orderId` for refund submission
+- does it define the agent runtime contract instead of assuming OpenClaw-specific session, memory, tool, or resume behavior
+- does it clarify session mode, direct mode, or adapter mode
+- does it support merchant `402 Payment Required` handoff when the merchant uses that protocol
+- does a merchant-originated payment handoff include structured `payment_required` data, exact payment parameters, correlation data, and a retry or resume target
+- does it define how the generic agent invokes `clink-payment-skill` or the adapter around it
+- does it prevent invented payment parameters and require explicit authorization before charge execution
+- does it define the payment handoff contract and preserve it as structured data
+- does it include merchant confirmation ownership and exactly-once or idempotent confirmation behavior
+- does it define callback, polling, queue, or recovery behavior for asynchronous payment completion
+- does it define task resume behavior after merchant confirmation
+- does it separate merchant skill or tool, agent runtime, adapter, merchant server, `agent-payment-skills`, webhook handler, notification sender, and recovery ownership
+- does it include `customer.verify` handling when email verification is in scope
 
 ## Documentation Checks
 

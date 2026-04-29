@@ -4,7 +4,7 @@ Use this module when the skill should produce developer-ready artifacts instead 
 
 ## Standard Integration Artifacts
 
-A strong merchant standard integration output should usually include:
+A strong standard integration output should usually include:
 
 - integration checklist
 - webhook handler checklist
@@ -20,14 +20,30 @@ For non-registered product mode, add:
 
 - inline payload design notes such as `priceDataList`
 
-## Merchant Agent Integration Artifacts
+## Merchant Skill for OpenClaw Integration Artifacts
 
-A strong merchant agent integration output should usually include:
+A strong merchant skill for OpenClaw integration output should usually include:
 
 - merchant server capability list
 - payment handoff contract skeleton
 - merchant confirmation checklist
 - recovery and resume checklist
+- `openclaw-payment-skills` dependency and ownership notes
+
+## Merchant Skill for Generic Agent Integration Artifacts
+
+A strong merchant skill for generic agent integration output should usually include:
+
+- agent-payment-skills dependency checklist
+- merchant skill or merchant tool responsibility checklist
+- generic agent adapter checklist
+- runtime contract assumptions
+- merchant 402 Payment Required handoff contract skeleton when the merchant uses that protocol
+- payment handoff contract skeleton
+- callback and resume design
+- merchant confirmation checklist
+- idempotency and duplicate-delivery rules
+- ownership matrix for merchant skill or tool, agent runtime, adapter, merchant server, and `agent-payment-skills`
 
 ## Validation Artifacts
 

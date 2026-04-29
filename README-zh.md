@@ -4,12 +4,13 @@
 
 `clink-integ-skills` 是一个模块化的 skill，用于指导 coding agent 完成 Clink 接入、校验接入决策、审查现有方案，以及回答基于官方文档的接入问题。
 
-它围绕四个核心场景构建：
+它围绕三条核心接入路径构建：
 
-- 商户标准接入
-- 商户 Agent 接入
-- 基于文档的接入指导
-- 集成校验与接入工件生成
+- 标准接入
+- 商户 Skill for 通用 Agent 接入
+- 商户 Skill for OpenClaw 接入
+
+它也支持基于 Clink 官方文档的接入指导、集成校验和接入工件生成。
 
 这个 skill 不复制 Clink 产品文档本身，而是在开发和维护这个 skill 时，把官方文档导出 `https://docs.clinkbill.com/llms-full.txt` 作为参考来源，让 skill 仓库本身聚焦在工作流、任务路由、校验逻辑、契约设计和输出质量上。它的职责是帮助 coding agent 判断应该如何正确接入，而不是在缺少项目上下文时直接猜测最终代码。
 
@@ -19,13 +20,14 @@
 
 你可以用这个 skill 来：
 
-- 设计商户标准接入流程，包括注册商品模式下的商品和价格选择、checkout session 创建、面向订阅的购买路径分流、webhook 契约审查，以及可选的通过 JS SDK 接入 embedded form
-- 设计通过 Clink payment skill 的商户 Agent 接入，包括商户 skill 接入，以及商户后端通过 `customer.verify` 支持 email verify webhook
+- 设计标准接入流程，包括注册商品模式下的商品和价格选择、checkout session 创建、面向订阅的购买路径分流、webhook 契约审查，以及可选的通过 JS SDK 接入 embedded form
+- 设计商户 Skill for 通用 Agent 接入，使用 `agent-payment-skills` / `clink-payment-skill`，包括 `clink-cli` 依赖、adapter contract、支付执行、callback 和任务恢复
+- 设计商户 Skill for OpenClaw 接入，使用 `openclaw-payment-skills`，包括商户 skill 接入，以及商户后端通过 `customer.verify` 支持 email verify webhook
 - 基于 Clink 官方文档回答问题，并提取相关 endpoint、field、webhook 和契约细节
-- 审查商户 Agent 接入场景下的 payment handoff 契约
+- 审查商户 Skill 接入场景下的 payment handoff 契约
 - 生成 checklist、contract skeleton、payload 示例和校验报告，帮助 coding agent 在真实项目栈里完成实现
 
-对于商户标准接入，默认范围包括：
+对于标准接入，默认范围包括：
 
 - 注册商品模式下从 Clink 获取商品和价格
 - 面向订阅场景的购买路径分流，例如 checkout 或 customer portal
@@ -39,6 +41,27 @@
 - 用更易懂的话解释官方文档内容
 - 回答 endpoint、field、webhook 或产品行为问题
 - 判断某个接入设计是否符合文档约束
+
+对于商户 Skill for 通用 Agent 接入，默认范围包括：
+
+- 识别目标 agent runtime，以及是否需要 adapter 层
+- 定义 merchant skill 或 merchant tool 在 generic agent runtime 里的职责
+- 定义 generic agent 如何调用 `agent-payment-skills` / `clink-payment-skill`
+- 支持商户返回 `402 Payment Required` 后，把结构化支付需求 handoff 给 `agent-payment-skills`
+- 定义 payment invocation、merchant confirmation、callback 和任务恢复契约
+- 拆清 generic agent runtime、adapter、merchant server 和 `agent-payment-skills` 的职责边界
+- 定义 handoff、callback、webhook 和 confirmation 路径的幂等与重复投递处理
+- 保持 `clink-payment-skill` 边界：它执行 wallet/card/pay/refund/risk-rule 操作，但不决定定价、权益或商户收款/充值确认
+
+对于商户 Skill for OpenClaw 接入，默认范围包括：
+
+- 定义 merchant skill 在 OpenClaw runtime 里的职责
+- 定义 merchant skill 如何调用 `openclaw-payment-skills`
+- 定义 session mode 或 direct mode 支付准备方式
+- 定义 merchant integration metadata，例如 `server`、`confirm_tool` 和 `confirm_args`
+- 拆清 merchant skill、merchant server 和 `openclaw-payment-skills` 的职责边界
+- 定义 merchant confirmation、recovery 和 task resume 行为
+- 在 email verification 相关场景中包含 `customer.verify` webhook 处理
 
 对于开发者校验请求，默认范围包括：
 
@@ -60,7 +83,8 @@
 
 - `帮我设计 checkout + webhook + refund 的标准接入方案`
 - `帮我设计注册商品模式接入，包含商品/价格选择、checkout、webhook 和 customer portal 兜底分流`
-- `帮我设计通过 Clink payment skill 的商户 Agent 接入，包含 merchant skill handoff 和 customer.verify 邮箱验证 webhook 支持`
+- `帮我设计通过 agent-payment-skills 的自研 agent runtime 商户 Skill for 通用 Agent 接入，包含 clink-cli 支付执行、callback 和任务恢复`
+- `帮我设计通过 openclaw-payment-skills 的商户 Skill for OpenClaw 接入，包含 merchant skill handoff 和 customer.verify 邮箱验证 webhook 支持`
 - `基于官方文档解释这个字段是什么意思`
 - `审查这个 payment handoff contract`
 
@@ -72,8 +96,9 @@
 |---|---|
 | `SKILL.md` | 主控路由与全局规则 |
 | `references/retrieval-protocol.md` | 本地文档检索协议 |
-| `references/standard-integration.md` | 商户标准接入工作流 |
-| `references/agent-integration.md` | 商户 Agent 接入工作流 |
+| `references/standard-integration.md` | 标准接入工作流 |
+| `references/generic-agent-integration.md` | 商户 Skill for 通用 Agent 接入工作流 |
+| `references/agent-integration.md` | 商户 Skill for OpenClaw 接入工作流 |
 | `references/output-artifacts.md` | 开发者输出工件规范 |
 | `references/validation-workflow.md` | 校验工作流 |
 | `references/review-checklist.md` | 审核清单与质量门槛 |
@@ -111,18 +136,26 @@
 
 ## 安装
 
-### 让你的智能体安装
+### 在智能体对话里安装
+
+打开 Claude、Codex 或 Gemini CLI，然后在对话里让智能体基于 GitHub 地址安装这个 skill：
 
 ```text
 Install clink-integ-skills: https://github.com/clinkbillcom/clink-integ-skills
 ```
 
-### 手动安装
+### 通过 Git Clone 安装
+
+对于兼容 Codex 的本地 skills，可以把仓库 clone 到 `~/.codex/skills/`：
 
 ```bash
-git clone https://github.com/clinkbillcom/clink-integ-skills.git
-cd clink-integ-skills
+mkdir -p ~/.codex/skills
+git clone https://github.com/clinkbillcom/clink-integ-skills.git ~/.codex/skills/clink-integ-skills
 ```
+
+### 手动本地安装兜底
+
+如果当前智能体不支持在对话里直接安装，运行环境也不能执行 `git clone`，可以下载仓库源码，并把解压后的 `clink-integ-skills` 目录放到智能体的本地 skills 目录下。对于 Codex，默认本地目录是 `~/.codex/skills/`。
 
 默认不需要额外安装运行时依赖。
 

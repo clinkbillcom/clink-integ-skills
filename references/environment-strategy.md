@@ -153,7 +153,7 @@ Checks fall into two categories:
 
 ### 1. Contract Validation (scripted)
 
-Applies to: merchant agent integrations.
+Applies to: merchant skill for generic agent integrations and merchant skill for OpenClaw integrations.
 
 Checks:
 
@@ -166,7 +166,7 @@ Tool: `node scripts/lint_contract.mjs`
 
 ### 2. Webhook Validation (scripted)
 
-Applies to: merchant standard integrations.
+Applies to: standard integrations.
 
 Checks:
 

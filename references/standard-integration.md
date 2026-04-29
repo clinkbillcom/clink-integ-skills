@@ -1,8 +1,8 @@
-# Merchant Standard Integration
+# Standard Integration
 
 ## Definition
 
-Merchant standard integration is the direct merchant-side Clink integration path for:
+Standard integration is the direct merchant-side Clink integration path for:
 
 - merchant backend checkout session creation
 - merchant webhook configuration and backend consumption

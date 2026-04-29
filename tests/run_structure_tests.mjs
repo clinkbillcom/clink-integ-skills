@@ -21,6 +21,7 @@ const requiredFiles = [
   "references/retrieval-protocol.md",
   "references/standard-integration.md",
   "references/agent-integration.md",
+  "references/generic-agent-integration.md",
   "references/output-artifacts.md",
   "references/validation-workflow.md",
   "references/review-checklist.md",
@@ -46,8 +47,11 @@ const moduleExpectations = [
   {
     file: "SKILL.md",
     contains: [
-      "merchant standard integration",
-      "merchant agent integration",
+      "standard integration",
+      "merchant skill for generic agent integration",
+      "merchant skill for OpenClaw integration",
+      "openclaw-payment-skills",
+      "agent-payment-skills",
       "Clink documentation-backed guidance",
       "Integration Validation",
       "merchantReferenceId",
@@ -70,7 +74,8 @@ const moduleExpectations = [
       "not a runtime requirement",
       "Do not read or cite",
       "POST /order/payment-session",
-      "WEBHOOK customer.verify"
+      "WEBHOOK customer.verify",
+      "merchant skill for generic agent integration"
     ]
   },
   {
@@ -98,7 +103,8 @@ const moduleExpectations = [
     contains: [
       "merchant skill",
       "merchant server",
-      "payment skill",
+      "openclaw-payment-skills",
+      "OpenClaw-native",
       "Session Mode",
       "Direct Mode",
       "POST /order/payment-session",
@@ -111,12 +117,51 @@ const moduleExpectations = [
     ]
   },
   {
+    file: "references/generic-agent-integration.md",
+    contains: [
+      "merchant skill for generic agent integration",
+      "OpenClaw",
+      "agent-payment-skills",
+      "clink-payment-skill",
+      "clink-cli",
+      "agent runtime",
+      "Merchant Skill / Merchant Tool",
+      "merchant skill or merchant tool",
+      "payment handoff",
+      "402 Payment Required",
+      "merchant-originated payment handoff",
+      "retry target",
+      "merchant server",
+      "explicitly authorized charge",
+      "Node.js >= 20",
+      "npm install -g @clink-ai/clink-cli",
+      "wallet init",
+      "card binding-link",
+      "card list",
+      "customerApiKey",
+      "CLINK_CUSTOMER_API_KEY",
+      "--dry-run",
+      "status `1`",
+      "status `3`",
+      "status `4`",
+      "status `6`",
+      "original `orderId`",
+      "callback",
+      "idempotency",
+      "resume"
+    ]
+  },
+  {
     file: "references/review-checklist.md",
     contains: [
       "merchantReferenceId",
       "idempotency",
       "customer.verify",
       "payment handoff",
+      "generic agent",
+      "card binding-link",
+      "customerApiKey",
+      "original `orderId`",
       "refund"
     ]
   },
@@ -135,6 +180,8 @@ const moduleExpectations = [
     contains: [
       "integration checklist",
       "payment handoff contract skeleton",
+      "generic agent adapter checklist",
+      "agent-payment-skills dependency checklist",
       "contract validation report",
       "launch-readiness checklist",
       "production promotion plan",

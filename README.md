@@ -4,12 +4,13 @@ English | [简体中文](README-zh.md)
 
 `clink-integ-skills` is a modular skill for guiding a coding agent through Clink integrations, validating integration decisions, reviewing existing designs, and answering documentation-backed integration questions.
 
-It is built around four primary scenarios:
+It is built around three primary integration paths:
 
-- merchant standard integration
-- merchant agent integration
-- Clink documentation-backed guidance
-- integration validation and guidance artifact generation
+- standard integration
+- merchant skill for generic agent integration
+- merchant skill for OpenClaw integration
+
+It also supports Clink documentation-backed guidance, integration validation, and guidance artifact generation.
 
 Instead of copying Clink product docs into the skill repository, this skill keeps workflow, routing, validation, and output conventions in the repo and uses the official Clink docs export at `https://docs.clinkbill.com/llms-full.txt` as the maintainer source during skill development. Its job is to help a coding agent decide how to integrate correctly, not to guess final project-specific code without enough stack context.
 
@@ -19,13 +20,14 @@ Instead of copying Clink product docs into the skill repository, this skill keep
 
 You can use this skill to:
 
-- design merchant standard integration flows, including registered-product product and price selection, checkout session creation, subscription-aware purchase-path routing, webhook contract review, and optional embedded form integration through JS SDK
-- design merchant agent integration through Clink payment skill, including merchant skill integration and merchant backend webhook support for email verification via `customer.verify`
+- design standard integration flows, including registered-product product and price selection, checkout session creation, subscription-aware purchase-path routing, webhook contract review, and optional embedded form integration through JS SDK
+- design merchant skill for generic agent integration using `agent-payment-skills` / `clink-payment-skill`, including `clink-cli` dependency setup, adapter contracts, payment execution, callback, and task resume behavior
+- design merchant skill for OpenClaw integration using `openclaw-payment-skills`, including merchant skill integration and merchant backend webhook support for email verification via `customer.verify`
 - answer questions based on official Clink docs and extract relevant endpoint, field, webhook, and contract details
-- review payment handoff contracts in merchant agent integrations
+- review payment handoff contracts in merchant skill integrations
 - generate developer-facing checklists, validation reports, payload skeletons, and guidance artifacts that help a coding agent implement the integration in the user’s actual stack
 
-For merchant standard integration, the expected scope includes:
+For standard integration, the expected scope includes:
 
 - registered-product product and price sourcing from Clink when that mode is used
 - subscription-aware purchase-path branching such as checkout vs customer portal
@@ -39,6 +41,27 @@ For documentation-backed guidance, the expected scope includes:
 - explaining doc content in plain language
 - answering endpoint, field, webhook, or behavior questions from official docs
 - checking whether an integration idea matches the documented contract
+
+For merchant skill for generic agent integration, the expected scope includes:
+
+- identifying the target agent runtime and whether an adapter is needed
+- defining merchant skill or merchant tool responsibilities in the generic agent runtime
+- defining how the generic agent invokes `agent-payment-skills` / `clink-payment-skill`
+- supporting merchant `402 Payment Required` handoff into `agent-payment-skills` when the merchant returns a structured payment requirement
+- defining payment invocation, merchant confirmation, callback, and resume contract
+- separating generic agent runtime, adapter, merchant server, and `agent-payment-skills` ownership
+- defining idempotency and duplicate-delivery behavior for handoff, callback, webhook, and confirmation paths
+- preserving the `clink-payment-skill` boundary: it executes wallet/card/pay/refund/risk-rule operations, but does not decide pricing, entitlement, or merchant receipt confirmation
+
+For merchant skill for OpenClaw integration, the expected scope includes:
+
+- defining merchant skill responsibilities inside the OpenClaw runtime
+- defining how the merchant skill invokes `openclaw-payment-skills`
+- defining session mode or direct mode payment setup
+- defining merchant integration metadata such as `server`, `confirm_tool`, and `confirm_args`
+- separating merchant skill, merchant server, and `openclaw-payment-skills` ownership
+- defining merchant confirmation, recovery, and task resume behavior
+- including `customer.verify` webhook handling when email verification is in scope
 
 For developer validation requests, the expected scope includes:
 
@@ -58,9 +81,10 @@ This skill should not usually try to output final project-specific integration c
 
 Examples:
 
-- `Design a merchant standard integration for checkout, webhook, and refund`
+- `Design a standard integration for checkout, webhook, and refund`
 - `Design a registered-product integration with product/price selection, checkout, webhook, and customer portal fallback`
-- `Design a merchant agent integration through Clink payment skill with merchant skill handoff and customer.verify email verification support`
+- `Design a merchant skill for generic agent integration using agent-payment-skills for my custom agent runtime with clink-cli payment execution, callback, and task resume`
+- `Design a merchant skill for OpenClaw integration using openclaw-payment-skills with merchant skill handoff and customer.verify email verification support`
 - `Explain what this Clink API field means based on the official docs`
 - `Review this payment handoff contract`
 
@@ -72,8 +96,9 @@ Examples:
 |---|---|
 | `SKILL.md` | Main routing and operating rules |
 | `references/retrieval-protocol.md` | Local-doc retrieval protocol |
-| `references/standard-integration.md` | Merchant standard integration workflow |
-| `references/agent-integration.md` | Merchant agent integration workflow |
+| `references/standard-integration.md` | Standard integration workflow |
+| `references/generic-agent-integration.md` | Merchant skill for generic agent integration workflow |
+| `references/agent-integration.md` | Merchant skill for OpenClaw integration workflow |
 | `references/output-artifacts.md` | Developer-facing artifact expectations |
 | `references/validation-workflow.md` | Validation workflow |
 | `references/review-checklist.md` | Review checklist and quality gates |
@@ -111,18 +136,26 @@ Common references live inside the cached `llms-full.txt`, including:
 
 ## Install
 
-### Ask Your Agent to Install It
+### Install From Your Agent Chat
+
+Open Claude, Codex, or Gemini CLI, then ask the agent to install the skill from GitHub:
 
 ```text
 Install clink-integ-skills: https://github.com/clinkbillcom/clink-integ-skills
 ```
 
-### Manual Install
+### Install With Git Clone
+
+For Codex-compatible local skills, clone the repository into `~/.codex/skills/`:
 
 ```bash
-git clone https://github.com/clinkbillcom/clink-integ-skills.git
-cd clink-integ-skills
+mkdir -p ~/.codex/skills
+git clone https://github.com/clinkbillcom/clink-integ-skills.git ~/.codex/skills/clink-integ-skills
 ```
+
+### Manual Local Install Fallback
+
+If the agent cannot install from chat and the environment cannot run `git clone`, download the repository source and place the extracted `clink-integ-skills` directory under the agent's local skills directory. For Codex, the default local directory is `~/.codex/skills/`.
 
 No runtime dependency install is required by default.
 

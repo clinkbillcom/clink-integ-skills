@@ -1,6 +1,6 @@
 ---
 name: clink-integ-skills
-description: Design, scaffold, validate, and review Clink merchant standard integrations, merchant agent integrations, and documentation-backed contracts.
+description: Design, scaffold, validate, and review Clink standard integrations, merchant skill for generic agent integrations, merchant skill for OpenClaw integrations, and documentation-backed contracts.
 ---
 
 # clink-integ-skills
@@ -16,16 +16,20 @@ This skill is modular:
 
 ## Scope
 
-This skill covers four primary scenarios:
+This skill covers three primary integration paths:
 
-- merchant standard integration, including checkout session creation, webhook contract review, and optional embedded form integration through JS SDK
-- merchant agent integration, including merchant skill integration and merchant backend webhook support for email verification
+- standard integration, including checkout session creation, webhook contract review, and optional embedded form integration through JS SDK
+- merchant skill for generic agent integration, including non-OpenClaw agent runtime contracts through `agent-payment-skills`, adapter design, `clink-cli` payment execution, callback, and task resume behavior
+- merchant skill for OpenClaw integration, including OpenClaw merchant skill integration through `openclaw-payment-skills` and merchant backend webhook support for email verification
+
+It also provides support capabilities for:
+
 - Clink documentation-backed guidance, including explaining official docs, answering doc-based integration questions, and extracting the relevant contract details from official docs
 - integration validation, including handoff contract validation, webhook-design validation, and integration guidance artifacts
 
 ## Routing
 
-### Merchant Standard Integration
+### Standard Integration
 
 Use this path when the user wants help with:
 
@@ -48,11 +52,11 @@ After drafting the solution, review it with:
 - `references/review-checklist.md`
 - `references/output-artifacts.md`
 
-### Merchant Agent Integration
+### Merchant Skill for OpenClaw Integration
 
 Use this path when the user wants help with:
 
-- merchant skill integration through Clink payment skill
+- OpenClaw-style merchant skill integration through `openclaw-payment-skills`
 - merchant backend webhook support for email verification via `customer.verify`
 - agent payment session design
 - payment handoff contracts
@@ -64,6 +68,30 @@ Read:
 
 - `references/retrieval-protocol.md`
 - `references/agent-integration.md`
+
+After drafting the solution, review it with:
+
+- `references/review-checklist.md`
+- `references/output-artifacts.md`
+
+### Merchant Skill for Generic Agent Integration
+
+Use this path when the user wants help with:
+
+- a merchant skill or merchant tool running inside a non-OpenClaw agent runtime
+- a merchant or platform agent that is not tied to OpenClaw
+- a generic agent runtime, third-party agent, custom orchestrator, or chat agent using `agent-payment-skills`
+- `clink-payment-skill` and `clink-cli` dependency design
+- adapter design between the agent runtime and `agent-payment-skills`
+- merchant `402 Payment Required` handoff from a merchant API or tool into `agent-payment-skills`
+- callback, polling, queue, or recovery design for payment completion
+- agent task resume behavior after merchant confirmation
+- generic payment handoff contracts
+
+Read:
+
+- `references/retrieval-protocol.md`
+- `references/generic-agent-integration.md`
 
 After drafting the solution, review it with:
 
@@ -118,7 +146,8 @@ After drafting the answer, review it with:
 - if the user asks for implementation and no codebase is present, identify or ask for the backend language before writing code
 - if the user asks for implementation guidance, help the coding agent decide what to build before attempting project-specific code
 - for standard integration, clarify product mode before designing checkout creation
-- for agent integration, separate merchant skill, merchant server, and payment skill responsibilities
+- for merchant skill for OpenClaw integration, separate merchant skill, merchant server, and `openclaw-payment-skills` responsibilities
+- for merchant skill for generic agent integration, separate merchant skill or tool, agent runtime, adapter, merchant server, `agent-payment-skills`, callback, and resume responsibilities
 - when the user asks for developer help, prefer producing executable artifacts such as checklists, sample payloads, contract skeletons, and validation reports
 - for validation tasks, prefer `node scripts/lint_contract.mjs`, `node scripts/lint_webhook_design.mjs`, and `node scripts/generate_guidance_artifacts.mjs`
 - resolve the target environment before generating any code or configuration; use the resolved base URL in all generated code
@@ -130,11 +159,11 @@ After drafting the answer, review it with:
 - do not generate production rollout guidance or production base URLs before the production validation gate completes successfully
 - if the current task needs official docs, do not read or cite the cached official docs before running the freshness check command
 - running `node scripts/load_official_docs.mjs` means: use cache if it is within 7 days, refresh only if missing or older than 7 days, and fall back to stale cache only when refresh fails
-- do not mix merchant standard integration and merchant agent integration unless the user explicitly wants both
+- do not mix standard integration, merchant skill for generic agent integration, and merchant skill for OpenClaw integration unless the user explicitly wants multiple paths
 - do not treat `merchantReferenceId` as an idempotency key
 - do not describe webhook handling without dashboard subscription, endpoint registration, signature verification, idempotency, retry handling, and out-of-order tolerance
 - do not assume a public refund-create API unless local docs explicitly show one
-- do not describe merchant agent integration as a plain checkout redirect flow
+- do not describe merchant skill integration as a plain checkout redirect flow
 - do not output final project-specific integration code unless the surrounding codebase and stack are known well enough
 - do not answer a developer integration request with prose only when guidance artifacts or validation reports would materially help
 
@@ -143,6 +172,7 @@ After drafting the answer, review it with:
 - `references/retrieval-protocol.md`
 - `references/standard-integration.md`
 - `references/agent-integration.md`
+- `references/generic-agent-integration.md`
 - `references/output-artifacts.md`
 - `references/validation-workflow.md`
 - `references/review-checklist.md`

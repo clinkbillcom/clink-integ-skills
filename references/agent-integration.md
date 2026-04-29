@@ -1,22 +1,24 @@
-# Merchant Agent Integration
+# Merchant Skill for OpenClaw Integration
 
 ## Definition
 
-Merchant agent integration means the merchant's own agent or merchant skill integrates with Clink payment skill to gain agent-side payment and payment handoff capability.
+Merchant skill for OpenClaw integration means the merchant's own OpenClaw agent or merchant skill integrates with `openclaw-payment-skills` to gain OpenClaw-native payment and payment handoff capability.
 
 The core scope of this path includes:
 
-- merchant skill integration
+- OpenClaw merchant skill integration
 - merchant backend webhook support for email verification via `customer.verify`
 - merchant confirmation after payment handoff
 - task resume after merchant confirmation succeeds
 
-This is different from standard checkout integration.
+This is different from standard integration.
 
 The merchant side does not rebuild the full payment infrastructure itself. Instead:
 
-- Clink payment skill handles payment infrastructure and payment execution
+- `openclaw-payment-skills` handles payment infrastructure and payment execution
 - the merchant side handles its own business preparation, confirmation, and task recovery
+
+This path is specifically for OpenClaw. For merchant skill for generic agent integration using `agent-payment-skills` / `clink-payment-skill` through `clink-cli`, use `references/generic-agent-integration.md`.
 
 ## Main Responsibilities
 
@@ -26,7 +28,7 @@ The merchant skill should:
 
 - detect when payment or recharge is needed
 - prepare payment-related business context
-- call the Clink payment skill
+- call `openclaw-payment-skills`
 - consume the payment handoff
 - pass the payment handoff into the merchant confirmation path exactly as required by the merchant integration contract
 - resume the original task after merchant confirmation succeeds
@@ -40,11 +42,11 @@ The merchant server should:
 - handle `customer.verify` webhook events for email verification
 - run merchant confirmation logic after payment handoff
 - support task recovery after payment success
-- provide the merchant integration identity or server contract used by the payment skill to route confirmation correctly
+- provide the merchant integration identity or server contract used by `openclaw-payment-skills` to route confirmation correctly
 
-### Clink Payment Skill
+### OpenClaw Payment Skill
 
-The payment skill should handle:
+`openclaw-payment-skills` should handle:
 
 - payment infrastructure
 - wallet and payment method setup
@@ -54,7 +56,7 @@ The payment skill should handle:
 
 ## Integration Modes
 
-Merchant agent integration should usually describe which of these modes applies:
+Merchant skill for OpenClaw integration should usually describe which of these modes applies:
 
 ### Session Mode
 
@@ -63,16 +65,16 @@ Use this mode when the merchant server creates a payment session first and retur
 Expected behavior:
 
 - merchant server creates the payment session before payment execution
-- payment skill is called with `sessionId`
+- `openclaw-payment-skills` is called with `sessionId`
 - amount, currency, and merchant validation are already bound to that session
 
 ### Direct Mode
 
-Use this mode when the merchant skill or merchant server provides merchant payment inputs directly to the payment skill.
+Use this mode when the merchant skill or merchant server provides merchant payment inputs directly to `openclaw-payment-skills`.
 
 Expected behavior:
 
-- payment skill is called with merchant payment inputs such as `merchant_id`, `amount`, and `currency`
+- `openclaw-payment-skills` is called with merchant payment inputs such as `merchant_id`, `amount`, and `currency`
 - merchant defaults must come from merchant configuration or current-turn user input
 - do not invent amount or merchant identity from memory
 
@@ -88,9 +90,9 @@ Do not describe this path as a plain checkout redirect flow.
 
 ## Merchant Payment Handoff Contract
 
-The payment skill should receive explicit merchant integration metadata so it knows how to route post-payment confirmation.
+`openclaw-payment-skills` should receive explicit merchant integration metadata so it knows how to route post-payment confirmation.
 
-A robust merchant agent integration should usually define:
+A robust merchant skill for OpenClaw integration should usually define:
 
 - merchant integration identity such as `server`
 - merchant confirmation entry such as `confirm_tool`
@@ -111,9 +113,9 @@ Do not strip, rewrite, or paraphrase the payment handoff before merchant confirm
 
 1. merchant agent detects a payment requirement
 2. merchant side creates payment session or payment intent
-3. merchant side calls Clink payment skill with prepared context and merchant integration metadata
-4. payment skill executes the payment flow
-5. payment skill emits payment handoff
+3. merchant side calls `openclaw-payment-skills` with prepared context and merchant integration metadata
+4. `openclaw-payment-skills` executes the payment flow
+5. `openclaw-payment-skills` emits payment handoff
 6. merchant side confirms the business result through the merchant confirmation path
 7. merchant side resumes the original pending task
 
@@ -133,7 +135,7 @@ This path should clearly separate ownership between:
 
 - merchant skill
 - merchant server
-- payment skill
+- `openclaw-payment-skills`
 - webhook handler
 - notification sender
 - recovery logic
@@ -145,7 +147,7 @@ Avoid overlapping responsibility for:
 - notification sending
 - task recovery
 
-Payment-layer success belongs to the payment skill.
+Payment-layer success belongs to `openclaw-payment-skills`.
 
 Merchant-layer success or failure belongs to the merchant confirmation path.
 
@@ -153,13 +155,13 @@ Do not send duplicate merchant success/failure notifications if the confirmation
 
 ## Output Expectations
 
-A good merchant agent integration output should usually include:
+A good merchant skill for OpenClaw integration output should usually include:
 
 - merchant skill responsibilities
 - merchant server responsibilities
 - session mode vs direct mode selection
 - developer-ready artifacts such as handoff contract skeleton, confirmation checklist, and recovery notes
-- payment skill dependency model
+- `openclaw-payment-skills` dependency model
 - payment handoff contract
 - merchant integration metadata such as `server`, `confirm_tool`, and `confirm_args`
 - email verification handling via `customer.verify`

@@ -45,7 +45,7 @@ If you only need the current cache status, run:
 
 ## Standard Integration Retrieval
 
-For merchant standard integration, read the smallest useful set first:
+For standard integration, read the smallest useful set first:
 
 1. quickstart content in `llms-full.txt`
 2. integration content in `llms-full.txt`
@@ -57,7 +57,7 @@ When webhook implementation is involved, also inspect the related webhook docs a
 
 ## Agent Integration Retrieval
 
-For merchant agent integration, read:
+For merchant skill for OpenClaw integration, read:
 
 1. overview and integration content in `llms-full.txt`
 2. API reference content in `llms-full.txt`
@@ -65,6 +65,16 @@ For merchant agent integration, read:
    - `POST /order/payment-session`
    - `GET /order/payment-session/{sessionId}`
    - `WEBHOOK customer.verify`
+
+For merchant skill for generic agent integration, read:
+
+1. overview and integration content in `llms-full.txt`
+2. API reference content in `llms-full.txt`
+3. local docs and schemas related to:
+   - `POST /order/payment-session`
+   - `GET /order/payment-session/{sessionId}`
+   - `WEBHOOK customer.verify`
+4. the local merchant skill for generic agent integration module for runtime-contract, callback, adapter, and resume requirements
 
 ## Precision Rules
 
