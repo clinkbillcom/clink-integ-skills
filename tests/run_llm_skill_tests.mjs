@@ -1,10 +1,11 @@
 import fs from "fs";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 import { loadOfficialDocs } from "../lib/docs-runtime.mjs";
 import { defaultDocsFallback, detectRoute, requiresDocsGate, resolveDocsRoot } from "../lib/skill-runtime.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const testsDir = path.join(repoRoot, "tests");
 const liveDir = path.join(testsDir, "live", "latest");
 const docsRoot = resolveDocsRoot(repoRoot);

@@ -4,9 +4,10 @@
 
 `clink-integ-skills` 是一个模块化的 skill，用于指导 coding agent 完成 Clink 接入、校验接入决策、审查现有方案，以及回答基于官方文档的接入问题。
 
-它围绕四条核心指导路径构建：
+它围绕五条核心指导路径构建：
 
 - 标准接入
+- clink-dev-cli first 自动化接入
 - 新用户 onboarding
 - 商户 Skill for 通用 Agent 接入
 - 商户 Skill for OpenClaw 接入
@@ -22,6 +23,7 @@
 你可以用这个 skill 来：
 
 - 设计标准接入流程，包括注册商品模式下的商品和价格选择、checkout session 创建、面向订阅的购买路径分流、webhook 契约审查，以及可选的通过 JS SDK 或 `@clink-ai/clink-elements` 接入 embedded form
+- 指导 CLI-first 接入，包括 `clink-dev-cli`、本地 `clink login` Secret Key bootstrap、无浏览器 Secret Key 设置、商品目录导入、webhook endpoint 自动化、signing secret 同步，以及 smoke-test/UAT 验证
 - 为新用户提供基于文档的首次接入指导，包括账号访问、MFA、merchant 选择、Secret Key 设置、商品模式选择、webhook 注册和首次 checkout 准备
 - 设计商户 Skill for 通用 Agent 接入，使用 `agentic-payment-skills` / `clink-payment-skill`，包括 `clink-cli` 依赖、adapter contract、支付执行、callback 和任务恢复
 - 设计商户 Skill for OpenClaw 接入，使用 `openclaw-payment-skills`，包括商户 skill 接入，以及商户后端通过 `customer.verify` 支持 email verify webhook
@@ -32,9 +34,10 @@
 对于标准接入，默认范围包括：
 
 - 注册商品模式下从 Clink 获取商品和价格
+- 当商户已有付费产品、价格页、CMS 条目或订阅套餐时，通过 `clink catalog validate`、`clink catalog plan` 和 `clink catalog import` 导入商品目录
 - 面向订阅场景的购买路径分流，例如 checkout 或 customer portal
 - 商户后端创建 checkout session
-- webhook 契约审查与商户 webhook 处理
+- 通过 `clink webhook endpoint ensure` 自动配置 webhook endpoint、同步 signing secret，并实现商户 webhook 处理
 - 订阅生命周期 webhook 覆盖，以及必要时在回跳后主动同步状态
 - 可选的商户前端通过 JS SDK 接入 embedded form，或通过配置好的链接打开支付流程
 - 通过 `@clink-ai/clink-elements` 接入 Elements embedded checkout，包括 React、Vue、原生 JS 指导；SDK 生命周期和 iframe mount/unmount；headless hook 或 composable 方案；inline、modal、drawer、多步骤 checkout 布局 recipe；事件到宿主 UI 的映射；优惠码 UI；locale/theme 定制；SDK 内置 skeleton 与宿主自定义 skeleton 策略；以及 embedded checkout 的 webhook 与 reconciliation 边界
@@ -45,8 +48,9 @@
 - 在 `Settings > Merchant` 确认 merchant 选择和 merchant profile
 - 在 `Settings > Users` 配置用户与角色
 - 通过 `Merchant Dashboard > Developers > API Keys` 和 `Initialize Key` 获取 Secret Key
+- 本地桌面环境可通过 `clink login` 和 `clink dashboard apikey ensure-secret --save --json` bootstrap Secret Key
 - 首次 checkout 前确认商品模式
-- 在 `Merchant Dashboard > Developers > Webhooks` 注册 webhook
+- 优先通过 `clink webhook endpoint ensure` 自动配置 webhook endpoint；CLI 自动化不可用时才回退到 Dashboard 设置
 - 准备首次 sandbox checkout session，并把用户路由到后续正确接入路径
 
 对于基于文档的接入指导，默认范围包括：
@@ -112,6 +116,7 @@
 |---|---|
 | `SKILL.md` | 主控路由与全局规则 |
 | `references/retrieval-protocol.md` | 本地文档检索协议 |
+| `references/clink-dev-cli-integration.md` | CLI-first Secret Key、商品目录、checkout、webhook 和 UAT 工作流 |
 | `references/new-user-onboarding.md` | 基于文档的新用户 onboarding 工作流 |
 | `references/standard-integration.md` | 标准接入工作流 |
 | `references/elements-integration.md` | Elements embedded checkout 前端工作流 |
@@ -120,7 +125,10 @@
 | `references/output-artifacts.md` | 开发者输出工件规范 |
 | `references/validation-workflow.md` | 校验工作流 |
 | `references/review-checklist.md` | 审核清单与质量门槛 |
+| `references/agent-prompt.zh-CN.md` | 面向自动化 ClinkBill UAT 接入的中文 agent prompt |
+| `references/universal-agent-prompt.zh-CN.md` | 可复用的简短 CLI-first 中文 prompt |
 | `scripts/load_payment_skill_contexts.mjs` | payment skill 上下文刷新与缓存加载 |
+| `agents/openai.yaml` | Skill 列表和默认 prompt 的 UI 元数据 |
 
 ---
 

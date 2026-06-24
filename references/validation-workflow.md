@@ -20,12 +20,13 @@ Prefer:
 
 For standard integration webhook validation:
 
-1. confirm dashboard subscription scope
-2. confirm endpoint registration
-3. confirm signing key retrieval path and handling: `Merchant Dashboard > Developers > Webhooks`, register or select the HTTPS endpoint, then copy the endpoint signing key into secure server configuration
-4. confirm header verification for `X-Clink-Timestamp` and `X-Clink-Signature`
-5. confirm idempotency, retry safety, and out-of-order tolerance
-6. emit remediation items for missing controls
+1. confirm endpoint registration is automated with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
+2. confirm the selected event-name scope, such as `--events core` or the smallest explicit event list required by the product flow
+3. confirm the returned or rotated signing secret is synced into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+4. confirm the service is restarted or redeployed after signing-secret sync
+5. confirm header verification for `X-Clink-Timestamp` and `X-Clink-Signature`
+6. confirm idempotency, retry safety, and out-of-order tolerance
+7. emit remediation items for missing controls
 
 Prefer:
 
@@ -99,6 +100,6 @@ Before emitting any code output, verify:
 - no `https://api.clinkbill.com` appears in sandbox code
 - no `https://uat-api.clinkbill.com` appears in production code
 - environment-specific secrets reference the correct environment via placeholders
-- any request for a webhook signing key includes the dashboard path and method: `Merchant Dashboard > Developers > Webhooks`, register or select the webhook endpoint, then copy the endpoint signing key
-- any request for a Secret Key includes the dashboard path and method: `Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, copy the Secret Key, and store it securely because it is shown only once
+- webhook signing keys are not requested from the user during initial setup; they come from `clink webhook endpoint ensure --save-secret`, then are synced into `CLINK_WEBHOOK_SIGNING_KEY`
+- any request for a Secret Key includes either the local desktop path (`clink login`, then `clink dashboard apikey ensure-secret --save --json`) or the browserless path (`Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, copy the Secret Key, and store it securely because it is shown only once)
 - real webhook signing keys and Secret Keys are never requested in chat or emitted into generated source, docs, logs, or public repositories

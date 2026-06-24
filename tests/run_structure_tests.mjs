@@ -1,14 +1,16 @@
 import fs from "fs";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const requiredFiles = [
   "SKILL.md",
   "README.md",
   "README-zh.md",
   "package.json",
+  "agents/openai.yaml",
   "scripts/refresh_official_docs.mjs",
   "scripts/load_official_docs.mjs",
   "scripts/load_payment_skill_contexts.mjs",
@@ -20,6 +22,9 @@ const requiredFiles = [
   "lib/validators.mjs",
   "lib/skill-runtime.mjs",
   "references/retrieval-protocol.md",
+  "references/clink-dev-cli-integration.md",
+  "references/agent-prompt.zh-CN.md",
+  "references/universal-agent-prompt.zh-CN.md",
   "references/new-user-onboarding.md",
   "references/standard-integration.md",
   "references/elements-integration.md",
@@ -51,6 +56,12 @@ const moduleExpectations = [
     file: "SKILL.md",
     contains: [
       "standard integration",
+      "clink-dev-cli",
+      "local clink login Secret Key bootstrap",
+      "clink dashboard apikey ensure-secret --save --json",
+      "Dashboard Console token",
+      "clink webhook endpoint ensure",
+      "CLINK_SECRET_KEY",
       "new user onboarding",
       "merchant skill for generic agent integration",
       "merchant skill for OpenClaw integration",
@@ -63,6 +74,7 @@ const moduleExpectations = [
       "node scripts/load_official_docs.mjs",
       "node scripts/load_payment_skill_contexts.mjs",
       "references/new-user-onboarding.md",
+      "references/clink-dev-cli-integration.md",
       "references/elements-integration.md",
       "@clink-ai/clink-elements",
       "loadClinkElements",
@@ -72,6 +84,45 @@ const moduleExpectations = [
       "guidance artifacts",
       "sandbox",
       "production"
+    ]
+  },
+  {
+    file: "agents/openai.yaml",
+    contains: [
+      "display_name",
+      "Clink Integration",
+      "short_description",
+      "default_prompt",
+      "$clink-integ-skills",
+      "clink-dev-cli"
+    ]
+  },
+  {
+    file: "references/clink-dev-cli-integration.md",
+    contains: [
+      "github:5048429/clink-dev-cli",
+      "Path A: Local Desktop Bootstrap",
+      "Path B: Cloud, Low-Code, Sandbox, Or Browserless",
+      "clink login",
+      "clink dashboard apikey ensure-secret --save --json",
+      "clink dashboard apikey ensure-secret --save --show-secret --json",
+      "Dashboard Console token",
+      "clink auth secret set",
+      "clink catalog validate",
+      "clink catalog plan",
+      "clink catalog import",
+      "clink webhook endpoint ensure",
+      "--events core",
+      "--save-secret",
+      "CLINK_SECRET_KEY",
+      "CLINK_WEBHOOK_SIGNING_KEY",
+      "sync",
+      "restart or redeploy",
+      "session.complete",
+      "order.succeeded",
+      "invoice.paid",
+      "cloudflared",
+      "checkoutUrl"
     ]
   },
   {
@@ -116,7 +167,12 @@ const moduleExpectations = [
       "node scripts/load_official_docs.mjs",
       "Merchant Dashboard > Developers > API Keys",
       "Initialize Key",
-      "Merchant Dashboard > Developers > Webhooks",
+      "clink login",
+      "clink dashboard apikey ensure-secret --save --json",
+      "clink auth secret set",
+      "clink webhook endpoint ensure",
+      "CLINK_WEBHOOK_SIGNING_KEY",
+      "restart or redeploy",
       "Settings > Merchant",
       "Settings > Users",
       "Products",
@@ -148,9 +204,13 @@ const moduleExpectations = [
       "JS SDK",
       "embedded form",
       "configured link opening",
-      "Merchant Dashboard > Developers > Webhooks",
       "Merchant Dashboard > Developers > API Keys",
       "Initialize Key",
+      "clink login",
+      "clink dashboard apikey ensure-secret --save --json",
+      "clink webhook endpoint ensure",
+      "CLINK_WEBHOOK_SIGNING_KEY",
+      "restart or redeploy",
       "X-Clink-Timestamp",
       "X-Clink-Signature",
       "raw event body",
@@ -257,8 +317,9 @@ const moduleExpectations = [
       "load_payment_skill_contexts",
       "--dependency openclaw-payment-skills",
       "--dependency agentic-payment-skills",
-      "Merchant Dashboard > Developers > Webhooks",
       "Merchant Dashboard > Developers > API Keys",
+      "clink webhook endpoint ensure",
+      "CLINK_WEBHOOK_SIGNING_KEY",
       "Elements",
       "loadClinkElements",
       "submit-enabled",
@@ -270,11 +331,19 @@ const moduleExpectations = [
   {
     file: "references/validation-workflow.md",
     contains: [
+      "clink webhook endpoint ensure",
+      "CLINK_WEBHOOK_SIGNING_KEY",
+      "clink dashboard apikey ensure-secret --save --json",
       "lint_contract",
       "lint_webhook_design",
       "generate_guidance_artifacts",
       "Production Validation Gate",
       "Sandbox Fallback"
+    ],
+    notContains: [
+      "Merchant Dashboard > Developers > Webhooks",
+      "copy the endpoint signing key",
+      "confirm dashboard subscription scope"
     ]
   },
   {
@@ -303,8 +372,15 @@ const moduleExpectations = [
       "sandbox registration is automatically approved",
       "JUSTCLINK",
       "production registration requires approval",
+      "clink webhook endpoint ensure",
+      "CLINK_WEBHOOK_SIGNING_KEY",
       "https://uat-api.clinkbill.com",
       "https://api.clinkbill.com"
+    ],
+    notContains: [
+      "Merchant Dashboard > Developers > Webhooks",
+      "copy the endpoint signing key",
+      "dashboard subscription is documented"
     ]
   }
 ];
@@ -334,6 +410,9 @@ for (const expectation of moduleExpectations) {
   const contents = read(expectation.file);
   for (const token of expectation.contains) {
     check(contents.includes(token), `${expectation.file} is missing expected token: ${token}`);
+  }
+  for (const token of expectation.notContains || []) {
+    check(!contents.includes(token), `${expectation.file} contains prohibited token: ${token}`);
   }
 }
 

@@ -3,15 +3,22 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 import { defaultDocsFallback, runSkillRuntime, getEnvironmentSignals, detectEnvironment, resolveEnvironment, buildArtifacts } from "../lib/skill-runtime.mjs";
 import { createRuntimeState, demoteToSandbox, approveProduction, skipProductionValidation } from "../lib/runtime-machine.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const docsFallback = defaultDocsFallback(repoRoot);
 const runtimeScript = path.join(repoRoot, "scripts", "run_skill_runtime.mjs");
 
 let checks = 0;
 const failures = [];
+const WEBHOOK_VALIDATION_INPUT = [
+  "We will run clink webhook endpoint ensure --url https://example.com/api/clink/webhook --events core --save-secret --json.",
+  "We will store and sync the returned webhook signing key as CLINK_WEBHOOK_SIGNING_KEY in the platform Secret or secret manager.",
+  "We will restart or redeploy the service after the secret sync.",
+  "We will verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+].join(" ");
 
 function check(condition, message) {
   checks += 1;
@@ -76,6 +83,10 @@ async function main() {
   check(onboarding.docsGateInvoked === true, "new user onboarding should invoke docs gate");
   check(onboarding.artifacts.some((item) => item.name === "new_user_onboarding_checklist"), "new user onboarding should emit onboarding checklist artifact");
   check(onboarding.artifacts.some((item) => item.name === "secret_setup_checklist"), "new user onboarding should emit secret setup checklist artifact");
+  check(
+    onboarding.artifacts.find((item) => item.name === "secret_setup_checklist")?.summary?.includes("Local clink login bootstrap"),
+    "new user onboarding secret setup should include local clink login bootstrap"
+  );
   check(onboarding.notes.some((item) => item.includes("docs-confirmed")), "new user onboarding should record docs-confirmed scope note");
 
   const onboardingReadiness = await runSkillRuntime({
@@ -105,7 +116,7 @@ async function main() {
 
   const validation = await runSkillRuntime({
     prompt: "Validate this webhook design before launch.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(validation.route === "integration_validation", "validation prompt should route to integration_validation");
@@ -245,7 +256,7 @@ async function main() {
   // Integration: scripted validation alone is not sufficient for production promotion
   const prodScriptedOnly = await runSkillRuntime({
     prompt: "Deploy to production our Clink checkout webhook integration.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(prodScriptedOnly.productionValidation?.passed === false, "scripted validation without semantic sign-off should not pass production validation");
@@ -258,7 +269,7 @@ async function main() {
 
   const prodValidationScriptedOnly = await runSkillRuntime({
     prompt: "Validate this webhook design before deploy to production.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(prodValidationScriptedOnly.route === "integration_validation", "production validation prompt should still route to integration_validation");
@@ -271,7 +282,7 @@ async function main() {
 
   const prodValidationApproved = await runSkillRuntime({
     prompt: "Validate this webhook design before deploy to production.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     semanticValidation: {
       ownershipBoundary: true,
       environmentCompleteness: true,
@@ -298,7 +309,7 @@ async function main() {
   // Integration: production with valid webhook input and semantic validation
   const prodValid = await runSkillRuntime({
     prompt: "Deploy to production our Clink checkout webhook integration.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     semanticValidation: {
       ownershipBoundary: true,
       environmentCompleteness: true,
@@ -497,7 +508,7 @@ async function main() {
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clink-runtime-"));
   const validationFile = path.join(tempRoot, "webhook.txt");
-  fs.writeFileSync(validationFile, "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.", "utf8");
+  fs.writeFileSync(validationFile, WEBHOOK_VALIDATION_INPUT, "utf8");
   const cliConfirmedSkipArgs = [
     runtimeScript,
     "--prompt",

@@ -180,9 +180,10 @@ Applies to: standard integrations.
 
 Checks:
 
-- dashboard subscription is documented
-- endpoint registration is defined
-- signing key retrieval is specified with the path and method: `Merchant Dashboard > Developers > Webhooks`, register or select the HTTPS endpoint, then copy the endpoint signing key into secure server configuration
+- endpoint registration is defined through `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
+- event-name subscription scope is documented, such as `--events core` or the smallest explicit event list required by the product flow
+- signing-secret sync is specified: sync the returned or rotated secret into `CLINK_WEBHOOK_SIGNING_KEY`
+- service restart or redeploy after signing-secret sync is specified
 - timestamp and signature verification logic is present
 - idempotency handling is defined (deduplication by event ID)
 - retry tolerance is addressed

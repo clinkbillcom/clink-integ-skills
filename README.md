@@ -4,9 +4,10 @@ English | [简体中文](README-zh.md)
 
 `clink-integ-skills` is a modular skill for guiding a coding agent through Clink integrations, validating integration decisions, reviewing existing designs, and answering documentation-backed integration questions.
 
-It is built around four primary guidance paths:
+It is built around five primary guidance paths:
 
 - standard integration
+- clink-dev-cli first integration
 - new user onboarding
 - merchant skill for generic agent integration
 - merchant skill for OpenClaw integration
@@ -22,6 +23,7 @@ Instead of copying Clink product docs into the skill repository, this skill keep
 You can use this skill to:
 
 - design standard integration flows, including registered-product product and price selection, checkout session creation, subscription-aware purchase-path routing, webhook contract review, and optional embedded form integration through JS SDK or `@clink-ai/clink-elements`
+- guide CLI-first integrations with `clink-dev-cli`, including local `clink login` Secret Key bootstrap, browserless Secret Key setup, catalog import, webhook endpoint automation, signing-secret sync, and smoke-test/UAT validation
 - guide new users through docs-backed first-time setup, including account access, MFA, merchant selection, Secret Key setup, product choice, webhook registration, and first checkout preparation
 - design merchant skill for generic agent integration using `agentic-payment-skills` / `clink-payment-skill`, including `clink-cli` dependency setup, adapter contracts, payment execution, callback, and task resume behavior
 - design merchant skill for OpenClaw integration using `openclaw-payment-skills`, including merchant skill integration and merchant backend webhook support for email verification via `customer.verify`
@@ -32,9 +34,10 @@ You can use this skill to:
 For standard integration, the expected scope includes:
 
 - registered-product product and price sourcing from Clink when that mode is used
+- product catalog import with `clink catalog validate`, `clink catalog plan`, and `clink catalog import` when the merchant already has paid products, pricing pages, CMS entries, or subscription plans
 - subscription-aware purchase-path branching such as checkout vs customer portal
 - merchant backend checkout session creation
-- webhook contract review and merchant webhook handling
+- webhook endpoint automation with `clink webhook endpoint ensure`, signing-secret sync, and merchant webhook handling
 - subscription lifecycle webhook coverage and post-return status reconciliation when needed
 - optional merchant frontend integration through JS SDK embedded form or configured link opening
 - Elements embedded checkout integration through `@clink-ai/clink-elements`, including React, Vue, and native JS guidance; SDK lifecycle and iframe mount/unmount behavior; headless hook or composable patterns plus inline, modal, drawer, and multi-step layout recipes; event-to-host-UI mapping; promotion-code UI integration; locale/theme customization; SDK-managed vs host-managed skeleton strategies; and webhook and reconciliation boundaries for embedded checkout
@@ -45,8 +48,9 @@ For new user onboarding, the expected scope includes:
 - merchant selection and merchant profile checks under `Settings > Merchant`
 - user and role setup under `Settings > Users`
 - Secret Key retrieval from `Merchant Dashboard > Developers > API Keys` through `Initialize Key`
+- local desktop Secret Key bootstrap through `clink login` and `clink dashboard apikey ensure-secret --save --json`
 - product mode decision before first checkout
-- webhook registration under `Merchant Dashboard > Developers > Webhooks`
+- webhook endpoint automation through `clink webhook endpoint ensure`, with Dashboard setup as a fallback when CLI automation is unavailable
 - first sandbox checkout session preparation and next-path routing
 
 For documentation-backed guidance, the expected scope includes:
@@ -112,6 +116,7 @@ Examples:
 |---|---|
 | `SKILL.md` | Main routing and operating rules |
 | `references/retrieval-protocol.md` | Local-doc retrieval protocol |
+| `references/clink-dev-cli-integration.md` | CLI-first Secret Key, catalog, checkout, webhook, and UAT workflow |
 | `references/new-user-onboarding.md` | Docs-backed new user onboarding workflow |
 | `references/standard-integration.md` | Standard integration workflow |
 | `references/elements-integration.md` | Elements embedded checkout frontend workflow |
@@ -120,7 +125,10 @@ Examples:
 | `references/output-artifacts.md` | Developer-facing artifact expectations |
 | `references/validation-workflow.md` | Validation workflow |
 | `references/review-checklist.md` | Review checklist and quality gates |
+| `references/agent-prompt.zh-CN.md` | Chinese agent prompt for automated ClinkBill UAT integration |
+| `references/universal-agent-prompt.zh-CN.md` | Short Chinese reusable prompt for CLI-first integration |
 | `scripts/load_payment_skill_contexts.mjs` | Payment skill context refresh and cache loader |
+| `agents/openai.yaml` | UI metadata for skill lists and default prompts |
 
 ---
 

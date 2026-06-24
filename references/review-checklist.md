@@ -19,14 +19,21 @@ This file is for final review and self-check. It is not the primary workflow doc
 - did the design identify the backend language or ask for it when needed
 - did the design clarify registered vs non-registered product mode
 - for registered product mode, does it explain where active `productId` and `priceId` come from
+- when existing site products, prices, or subscriptions exist, does it use agent-discovered `clink-catalog.json` plus `clink catalog validate/plan/import` instead of manual ID copying
 - for non-registered product mode, does it explain how merchant-defined line items are built into `priceDataList`
 - for non-registered product mode, does it keep merchant-specific business inputs in the merchant order model
 - for subscription purchases, does it explain whether the flow should create a new checkout session or route to customer portal
 - does checkout map merchant `order_id` to `merchantReferenceId`
 - does the design avoid treating `merchantReferenceId` as an idempotency key
 - does the design keep `originalAmount` aligned with the merchant-defined checkout payload
-- does webhook implementation include dashboard subscription and endpoint registration
-- when a webhook signing key is requested or configured, does the output tell the user to get it from `Merchant Dashboard > Developers > Webhooks` by registering or selecting the webhook endpoint and copying the endpoint signing key
+- does webhook implementation include endpoint registration through `clink webhook endpoint ensure --events core --save-secret --json` or a clearly identified fallback
+- does webhook setup sync the returned or rotated signing secret into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+- does webhook setup restart or redeploy the service after syncing the signing secret
+- does webhook setup explain that URL changes require rerunning endpoint ensure and resyncing the signing secret
+- does the output avoid asking for `CLINK_WEBHOOK_SIGNING_KEY` as an initial user-provided secret
+- for local desktop setup without an existing Secret Key, does it use `clink login` only for human-assisted Dashboard login and then `clink dashboard apikey ensure-secret --save --json`
+- for cloud, low-code, sandbox, or browserless setup, does it ask only for `CLINK_SECRET_KEY` and then use `clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox`
+- after `CLINK_SECRET_KEY` is configured, does it avoid requiring a Dashboard Console token for catalog import, checkout/subscription APIs, webhook endpoint management, doctor, smoke-test, or local webhook commands
 - when a Secret Key is requested or configured, does the output tell the user to get it from `Merchant Dashboard > Developers > API Keys` by clicking `Initialize Key`, copying it once, and storing it securely
 - does the output avoid asking the user to paste real webhook signing keys or Secret Keys into chat, generated source code, docs, logs, or public repositories
 - does webhook coverage include subscription lifecycle events when the product mode is subscription-based
@@ -69,7 +76,7 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does it tell the user to confirm merchant selection and merchant profile under `Settings > Merchant`
 - does it explain team access through `Settings > Users` and avoid giving Developer access to roles that docs say do not have it
 - does it include Secret Key retrieval through `Merchant Dashboard > Developers > API Keys` and `Initialize Key`
-- does it include webhook registration and signing key retrieval through `Merchant Dashboard > Developers > Webhooks`
+- does it include CLI webhook endpoint ensure and signing-secret sync instead of defaulting to manual Dashboard webhook setup
 - does it distinguish registered product mode from non-registered product mode before first checkout setup
 - does it explain that subscription recurring payments require pre-created products according to the checkout docs
 - does it route the user to standard integration, generic agent integration, OpenClaw integration, or validation after onboarding
