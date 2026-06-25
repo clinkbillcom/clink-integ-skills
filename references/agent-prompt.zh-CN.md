@@ -6,11 +6,28 @@
 
 请保持真实、可验证：如果没有人打开 `checkoutUrl` 并完成 UAT 测试支付，不要把“真实 checkout session 创建成功 + 签名模拟 webhook 通过”说成“真实付款全链路完成”。
 
+## 安装/加载 skill
+
+如果当前 agent 尚未安装或加载 `$clink-integ-skills`，请先从临时 skill 来源安装/加载：
+
+- `https://github.com/5048429/clink-integ-skills/tree/merge/cli-first-automation`
+
+公司官方 skill 仓库审批完成前，不要依赖 `https://github.com/clinkbillcom/clink-integ-skills` 作为安装来源。
+
+如果 agent 支持对话内安装，请直接安装上面的 GitHub 地址。如果 agent 是 Codex 兼容本地 skill 环境，使用：
+
+```bash
+mkdir -p ~/.codex/skills
+git clone --branch merge/cli-first-automation --depth 1 https://github.com/5048429/clink-integ-skills.git ~/.codex/skills/clink-integ-skills
+```
+
+安装/加载完成后，再使用 `$clink-integ-skills` 继续接入任务。
+
 ## 资料
 
 请先读取：
 
-- https://github.com/clinkbillcom/clink-integ-skills
+- https://github.com/5048429/clink-integ-skills/tree/merge/cli-first-automation
 - https://docs.clinkbill.com/api-reference/introduction
 - https://github.com/5048429/clink-dev-cli
 

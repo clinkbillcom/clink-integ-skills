@@ -2,7 +2,27 @@
 
 把下面这段复制给任意可以帮你构建、修改或部署网站的 AI agent。若该 agent 支持技能调用，优先要求它使用 `$clink-integ-skills`。
 
+公司官方 skill 仓库审批完成前，临时从你的 fork 安装/加载 skill：
+
+- skill 来源：`https://github.com/5048429/clink-integ-skills/tree/merge/cli-first-automation`
+- 如果 agent 支持对话内安装，先让它安装这个地址。
+- 如果 agent 是 Codex 兼容本地 skill，兜底命令是：
+
+```bash
+mkdir -p ~/.codex/skills
+git clone --branch merge/cli-first-automation --depth 1 https://github.com/5048429/clink-integ-skills.git ~/.codex/skills/clink-integ-skills
+```
+
 ```text
+如果当前环境还没有安装或加载 $clink-integ-skills，请先从临时 skill 来源安装/加载：
+https://github.com/5048429/clink-integ-skills/tree/merge/cli-first-automation
+
+如果你是 Codex 兼容本地 skill 环境，可以执行：
+mkdir -p ~/.codex/skills
+git clone --branch merge/cli-first-automation --depth 1 https://github.com/5048429/clink-integ-skills.git ~/.codex/skills/clink-integ-skills
+
+安装/加载完成后，再继续下面的接入任务。
+
 请使用 $clink-integ-skills 帮我把 ClinkBill 支付接入到当前网站项目。
 
 目标：尽量全自动完成 ClinkBill UAT 支付接入。
