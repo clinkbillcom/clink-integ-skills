@@ -20,12 +20,14 @@ Prefer:
 
 For standard integration webhook validation:
 
-1. confirm dashboard subscription scope
-2. confirm endpoint registration
-3. confirm signing key retrieval path and handling: `Merchant Dashboard > Developers > Webhooks`, register or select the HTTPS endpoint, then copy the endpoint signing key into secure server configuration
-4. confirm header verification for `X-Clink-Timestamp` and `X-Clink-Signature`
-5. confirm idempotency, retry safety, and out-of-order tolerance
-6. emit remediation items for missing controls
+1. confirm endpoint registration is automated with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
+2. confirm the selected event-name scope, such as `--events core` or the smallest explicit event list required by the product flow
+3. confirm the returned or rotated signing secret is synced into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+4. confirm the service is restarted or redeployed after signing-secret sync
+5. confirm header verification for `X-Clink-Timestamp` and `X-Clink-Signature`
+6. confirm idempotency, retry safety, and out-of-order tolerance
+7. confirm order reconciliation matches both `merchantReferenceId` and `sessionId` when both are available, and quarantines mismatches
+8. emit remediation items for missing controls
 
 Prefer:
 
@@ -56,7 +58,7 @@ When the detected environment is `production`, run these checks before generatin
 ### Semantic Checks
 
 3. **Ownership-boundary validation** (all types): verify each component has a clear owner, no merchant code assumes Clink-owned behavior, no Clink behavior is duplicated in merchant code
-4. **Environment completeness validation** (all types): verify all base URLs match the target environment, no cross-environment URL leakage, environment-specific secrets use placeholders
+4. **Environment completeness validation** (all types): verify all base URLs match the target environment, CLI request-domain selection is confirmed with `clink env show <name> --json`, no cross-environment URL leakage, environment-specific secrets use placeholders
 
 ### Result Handling
 
@@ -96,9 +98,12 @@ Before emitting any code output, verify:
 
 - target environment is declared in all generated code and configuration
 - all base URLs match the target environment
+- CLI commands use `--env <name>` or `CLINK_ENV` for the resolved request-domain environment
+- any custom CLI environment is registered with `clink env add <name> --api-base-url <url>` and confirmed with `clink env show <name> --json`
+- `--base-url` and `CLINK_BASE_URL` are treated only as temporary one-off overrides and are not used to bypass production validation
 - no `https://api.clinkbill.com` appears in sandbox code
 - no `https://uat-api.clinkbill.com` appears in production code
 - environment-specific secrets reference the correct environment via placeholders
-- any request for a webhook signing key includes the dashboard path and method: `Merchant Dashboard > Developers > Webhooks`, register or select the webhook endpoint, then copy the endpoint signing key
-- any request for a Secret Key includes the dashboard path and method: `Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, copy the Secret Key, and store it securely because it is shown only once
+- webhook signing keys are not requested from the user during initial setup; they come from `clink webhook endpoint ensure --save-secret`, then are synced into `CLINK_WEBHOOK_SIGNING_KEY`
+- any request for a Secret Key includes either the local desktop path (`clink login`, then `clink dashboard apikey ensure-secret --save --json`) or the browserless path (`Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, copy the Secret Key, and store it securely because it is shown only once)
 - real webhook signing keys and Secret Keys are never requested in chat or emitted into generated source, docs, logs, or public repositories

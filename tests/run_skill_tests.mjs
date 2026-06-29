@@ -1,8 +1,9 @@
 import { execFileSync } from "child_process";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 
-const testsDir = path.dirname(new URL(import.meta.url).pathname);
+const testsDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(testsDir, "..");
 
 const commands = [

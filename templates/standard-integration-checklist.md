@@ -2,14 +2,22 @@
 
 - Confirm backend stack: {{STACK_NOTE}}
 - Confirm product mode: registered or non-registered
+- Discover products in this order: running API/pricing DOM, then source/configuration, then user clarification
+- Write `clink-catalog.json` when products are discovered, including one image source per product: `imageId`, `imageUrl`, or `imageFile`
 - Create or confirm local merchant order before checkout session creation
 - Map merchant `order_id` to `merchantReferenceId`
 - Implement merchant-side idempotency outside Clink
 - Decide checkout vs customer portal for subscription-aware paths
-- Configure `CLINK_SECRET_KEY` from `Merchant Dashboard > Developers > API Keys` by clicking `Initialize Key`, copying the Secret Key once, and storing it securely
-- Configure dashboard webhook subscriptions and endpoint registration
-- Configure `CLINK_WEBHOOK_SIGNING_KEY` from `Merchant Dashboard > Developers > Webhooks` by registering or selecting the HTTPS endpoint and copying the endpoint signing key
+- Configure `CLINK_SECRET_KEY` through either local `clink login` + `clink dashboard apikey ensure-secret --save --json`, or a browserless manual Secret Key copied from `Merchant Dashboard > Developers > API Keys`
+- Verify `clink auth secret set --help`, `clink catalog import --help`, and `clink webhook endpoint ensure --help`
+- Configure webhook endpoint with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
+- For local env-file apps, prefer `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --sync-env-file <env-file> --json`
+- Sync the returned or rotated signing secret to the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+- Restart or redeploy after syncing the webhook signing secret
 - Verify `X-Clink-Timestamp` and `X-Clink-Signature`
 - Handle idempotency, retry safety, and out-of-order delivery
+- Match webhook events to local orders with both `merchantReferenceId` and `sessionId` when both are available
+- Rerun endpoint ensure and resync the signing secret whenever the webhook URL changes
 - Separate payment confirmation from downstream merchant fulfillment
+- Verify real sandbox payment by confirming local order paid/completed and entitlement/fulfillment completion, not just webhook HTTP 200
 - Model refund as a lifecycle, not as a guaranteed public create API

@@ -3,15 +3,22 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 import { defaultDocsFallback, runSkillRuntime, getEnvironmentSignals, detectEnvironment, resolveEnvironment, buildArtifacts } from "../lib/skill-runtime.mjs";
 import { createRuntimeState, demoteToSandbox, approveProduction, skipProductionValidation } from "../lib/runtime-machine.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const docsFallback = defaultDocsFallback(repoRoot);
 const runtimeScript = path.join(repoRoot, "scripts", "run_skill_runtime.mjs");
 
 let checks = 0;
 const failures = [];
+const WEBHOOK_VALIDATION_INPUT = [
+  "We will run clink webhook endpoint ensure --url https://example.com/api/clink/webhook --events core --save-secret --json.",
+  "We will store and sync the returned webhook signing key as CLINK_WEBHOOK_SIGNING_KEY in the platform Secret or secret manager.",
+  "We will restart or redeploy the service after the secret sync.",
+  "We will verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+].join(" ");
 
 function check(condition, message) {
   checks += 1;
@@ -27,6 +34,7 @@ async function main() {
   check(standard.routeConfidence !== "low", "plain standard prompt should not be low-confidence");
   check(standard.questions.some((item) => item.includes("backend language")), "implementation without code context should ask for backend language");
   check(standard.artifacts.some((item) => item.name === "integration_checklist"), "standard route should emit integration_checklist artifact");
+  check(standard.artifacts.some((item) => item.name === "cli_environment_checklist"), "standard route should emit cli_environment_checklist artifact");
 
   const nodeStandard = await runSkillRuntime({
     prompt: "Help me implement Clink checkout session creation in this service.",
@@ -52,6 +60,37 @@ async function main() {
   });
   check(registered.artifacts.some((item) => item.name === "product_price_sourcing"), "registered product prompt should emit product_price_sourcing artifact");
 
+  const chineseCatalogImport = await runSkillRuntime({
+    prompt: "当前网站已经有价格页、付费商品、商品图片和订阅套餐，请接入 ClinkBill 并自动导入商品目录。",
+    docsFallbackSource: docsFallback,
+  });
+  check(chineseCatalogImport.route === "merchant_standard_integration", "Chinese catalog import prompt should route to standard integration");
+  check(chineseCatalogImport.artifacts.some((item) => item.name === "catalog_import_plan"), "Chinese catalog import prompt should emit catalog_import_plan artifact");
+  check(chineseCatalogImport.artifacts.some((item) => item.name === "product_price_sourcing"), "Chinese catalog import prompt should emit product_price_sourcing artifact");
+  check(!chineseCatalogImport.questions.some((item) => item.includes("registered product mode")), "Chinese catalog import prompt should not ask product mode");
+
+  const catalogPlanImport = await runSkillRuntime({
+    prompt: "Validate, plan, and import my pricing page products into Clink catalog.",
+    docsFallbackSource: docsFallback,
+  });
+  check(catalogPlanImport.route === "merchant_standard_integration", "catalog validate/plan/import prompt should route to standard integration");
+  check(catalogPlanImport.artifacts.some((item) => item.name === "catalog_import_plan"), "catalog validate/plan/import prompt should emit catalog_import_plan");
+  check(catalogPlanImport.artifacts.some((item) => item.name === "product_price_sourcing"), "catalog validate/plan/import prompt should emit product_price_sourcing");
+
+  const docsOnlyNoCode = await runSkillRuntime({
+    prompt: "Using official Clink docs only, explain the checkout session fields. Do not write code.",
+    docsFallbackSource: docsFallback,
+  });
+  check(docsOnlyNoCode.route === "documentation_dialogue", "docs-only no-code prompt should route to documentation_dialogue");
+  check(docsOnlyNoCode.docsGateInvoked === true, "docs-only no-code prompt should invoke docs gate");
+  check(docsOnlyNoCode.artifacts.some((item) => item.name === "doc_fact_table"), "docs-only no-code prompt should emit doc_fact_table");
+
+  const nonClinkStripe = await runSkillRuntime({
+    prompt: "Help me integrate Stripe Checkout and handle Stripe webhook signature verification.",
+    docsFallbackSource: docsFallback,
+  });
+  check(nonClinkStripe.route === "none", "Stripe-only prompt should not trigger a Clink integration route");
+
   const agent = await runSkillRuntime({
     prompt: "Design a merchant agent integration using Clink payment skill and customer.verify.",
     docsFallbackSource: docsFallback,
@@ -76,6 +115,11 @@ async function main() {
   check(onboarding.docsGateInvoked === true, "new user onboarding should invoke docs gate");
   check(onboarding.artifacts.some((item) => item.name === "new_user_onboarding_checklist"), "new user onboarding should emit onboarding checklist artifact");
   check(onboarding.artifacts.some((item) => item.name === "secret_setup_checklist"), "new user onboarding should emit secret setup checklist artifact");
+  check(onboarding.artifacts.some((item) => item.name === "cli_environment_checklist"), "new user onboarding should emit cli_environment_checklist artifact");
+  check(
+    onboarding.artifacts.find((item) => item.name === "secret_setup_checklist")?.summary?.includes("Local clink login bootstrap"),
+    "new user onboarding secret setup should include local clink login bootstrap"
+  );
   check(onboarding.notes.some((item) => item.includes("docs-confirmed")), "new user onboarding should record docs-confirmed scope note");
 
   const onboardingReadiness = await runSkillRuntime({
@@ -105,11 +149,54 @@ async function main() {
 
   const validation = await runSkillRuntime({
     prompt: "Validate this webhook design before launch.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(validation.route === "integration_validation", "validation prompt should route to integration_validation");
   check(validation.validation?.valid === true, "complete webhook validation input should pass");
+
+  const orderSync = await runSkillRuntime({
+    prompt: "Using official docs, help me implement Clink order sync. Query GET /order, consume order webhooks, and reconcile merchantReferenceId plus sessionId.",
+    docsFallbackSource: docsFallback,
+  });
+  check(orderSync.route === "merchant_standard_integration", "order sync implementation prompt should route to standard integration");
+  check(orderSync.docsGateInvoked === true, "order sync implementation prompt should invoke docs gate");
+  check(orderSync.artifacts.some((item) => item.name === "merchant_order_mapping"), "order sync implementation prompt should emit merchant_order_mapping");
+  check(orderSync.artifacts.some((item) => item.name === "webhook_handler_checklist"), "order sync implementation prompt should emit webhook_handler_checklist");
+
+  const refundLifecycle = await runSkillRuntime({
+    prompt: "Help me design the Clink refund lifecycle. Check docs before claiming a public create refund API and include refund webhook handling.",
+    docsFallbackSource: docsFallback,
+  });
+  check(refundLifecycle.docsGateInvoked === true, "refund lifecycle prompt should invoke docs gate");
+  check(refundLifecycle.notes.some((item) => item.includes("refund-create API")), "refund lifecycle prompt should warn when public refund-create API is unconfirmed");
+
+  const subscriptionBilling = await runSkillRuntime({
+    prompt: "We are a SaaS subscription business. Using official docs, create products and prices, create/get/cancel subscription, and handle subscription and invoice webhooks.",
+    docsFallbackSource: docsFallback,
+  });
+  check(subscriptionBilling.route === "merchant_standard_integration", "subscription billing prompt should route to standard integration");
+  check(subscriptionBilling.docsGateInvoked === true, "subscription billing prompt should invoke docs gate");
+  check(subscriptionBilling.artifacts.some((item) => item.name === "product_price_sourcing"), "subscription billing prompt should emit product_price_sourcing");
+  check(subscriptionBilling.artifacts.some((item) => item.name === "webhook_handler_checklist"), "subscription billing prompt should emit webhook_handler_checklist");
+
+  const genericAgent = await runSkillRuntime({
+    prompt: "Design a generic non-OpenClaw agent integration using agentic-payment-skills, clink-payment-skill, and clink-cli.",
+    docsFallbackSource: docsFallback,
+  });
+  check(genericAgent.route === "merchant_agent_integration", "generic agentic payment prompt should route to merchant_agent_integration");
+  check(genericAgent.artifacts.some((item) => item.name === "payment_handoff_contract"), "generic agentic payment prompt should emit payment_handoff_contract");
+  check(genericAgent.artifacts.some((item) => item.name === "ownership_matrix"), "generic agentic payment prompt should emit ownership_matrix");
+
+  const dashboardFallbackReview = await runSkillRuntime({
+    prompt: "Review this webhook setup: we will copy the signing key from Merchant Dashboard > Developers > Webhooks.",
+    docsFallbackSource: docsFallback,
+  });
+  check(dashboardFallbackReview.route === "review", "Dashboard webhook fallback prompt should route to review");
+  check(
+    dashboardFallbackReview.notes.some((item) => item.includes("clink webhook endpoint ensure") && item.includes("fallback")),
+    "Dashboard webhook fallback prompt should keep CLI primary and Dashboard fallback wording"
+  );
 
   const ambiguous = await runSkillRuntime({
     prompt: "Help me design checkout, webhook, and payment handoff support for the same merchant flow.",
@@ -126,15 +213,22 @@ async function main() {
   check(sandboxResolved.baseUrl === "https://uat-api.clinkbill.com", "resolveEnvironment sandbox should return uat URL");
   check(sandboxResolved.internalEnvironment === "uat", "resolveEnvironment sandbox should return uat internal");
   check(sandboxResolved.targetEnvironment === "sandbox", "resolveEnvironment sandbox should return sandbox target");
+  check(sandboxResolved.cliEnvironment === "sandbox", "resolveEnvironment sandbox should return CLI sandbox environment");
+  check(sandboxResolved.cliApiBaseUrl === "https://uat-api.clinkbill.com/api/", "resolveEnvironment sandbox should return CLI sandbox API base URL");
 
   const prodResolved = resolveEnvironment("production");
   check(prodResolved.baseUrl === "https://api.clinkbill.com", "resolveEnvironment production should return prod URL");
   check(prodResolved.internalEnvironment === "prod", "resolveEnvironment production should return prod internal");
+  check(prodResolved.cliEnvironment === "production", "resolveEnvironment production should return CLI production environment");
+  check(prodResolved.cliApiBaseUrl === "https://api.clinkbill.com/api/", "resolveEnvironment production should return CLI production API base URL");
 
   // Unit: getEnvironmentSignals
   const goLiveSignals = getEnvironmentSignals("We need to go live with our integration");
   check(goLiveSignals.production === true, "go live should produce production signal");
   check(goLiveSignals.sandbox === false, "go live should not produce sandbox signal");
+
+  const naturalDeploySignals = getEnvironmentSignals("Deploy this ClinkBill checkout integration to production.");
+  check(naturalDeploySignals.production === true, "deploy ... to production should produce production signal");
 
   const noSignals = getEnvironmentSignals("Help me implement checkout");
   check(noSignals.production === false, "generic prompt should not produce production signal");
@@ -153,6 +247,7 @@ async function main() {
   // Unit: detectEnvironment
   check(detectEnvironment({ prompt: "Help me build a checkout" }) === "sandbox", "generic prompt should detect sandbox");
   check(detectEnvironment({ prompt: "Deploy to production" }) === "production", "production prompt should detect production");
+  check(detectEnvironment({ prompt: "Deploy this ClinkBill checkout integration to production." }) === "production", "natural deploy to production prompt should detect production");
   check(detectEnvironment({ prompt: "Switch back to sandbox from production" }) === "sandbox", "sandbox signal should take priority over production");
   check(detectEnvironment({ prompt: "Use productId pricing" }) === "sandbox", "product keywords should not resolve to production");
   check(detectEnvironment({ prompt: "Use product" }) === "sandbox", "product keywords should not resolve to production");
@@ -164,6 +259,10 @@ async function main() {
   check(standard.environment?.targetEnvironment === "sandbox", "default prompt should resolve to sandbox environment");
   check(standard.environment?.baseUrl === "https://uat-api.clinkbill.com", "sandbox should use uat base URL");
   check(standard.productionValidation === null, "sandbox prompt should not trigger production validation");
+  check(
+    standard.notes.some((item) => item.includes("4242424242424242") && item.includes("3-digit CVC") && item.includes("future expiry")),
+    "sandbox standard integration should remind users about the UAT card-binding test card"
+  );
 
   const defaultState = createRuntimeState({
     route: "merchant_standard_integration",
@@ -242,10 +341,18 @@ async function main() {
   check(prodNoInput.runtimeState?.resolvedEnvironment === "sandbox", "production without validation input should resolve to sandbox in runtime state");
   check(prodNoInput.runtimeState?.stage === "ready", "production without validation input should land in ready stage after demotion");
 
+  const naturalProdNoInput = await runSkillRuntime({
+    prompt: "Deploy this ClinkBill checkout integration to production.",
+    docsFallbackSource: docsFallback,
+  });
+  check(naturalProdNoInput.productionValidation !== null, "natural production prompt should trigger production validation gate");
+  check(naturalProdNoInput.environment?.targetEnvironment === "sandbox", "natural production prompt without validation should fall back to sandbox");
+  check(naturalProdNoInput.artifacts.every((item) => ["validation_report", "remediation_checklist"].includes(item.name)), "natural production prompt failure should only emit remediation artifacts");
+
   // Integration: scripted validation alone is not sufficient for production promotion
   const prodScriptedOnly = await runSkillRuntime({
     prompt: "Deploy to production our Clink checkout webhook integration.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(prodScriptedOnly.productionValidation?.passed === false, "scripted validation without semantic sign-off should not pass production validation");
@@ -258,7 +365,7 @@ async function main() {
 
   const prodValidationScriptedOnly = await runSkillRuntime({
     prompt: "Validate this webhook design before deploy to production.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     docsFallbackSource: docsFallback,
   });
   check(prodValidationScriptedOnly.route === "integration_validation", "production validation prompt should still route to integration_validation");
@@ -271,7 +378,7 @@ async function main() {
 
   const prodValidationApproved = await runSkillRuntime({
     prompt: "Validate this webhook design before deploy to production.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     semanticValidation: {
       ownershipBoundary: true,
       environmentCompleteness: true,
@@ -298,7 +405,7 @@ async function main() {
   // Integration: production with valid webhook input and semantic validation
   const prodValid = await runSkillRuntime({
     prompt: "Deploy to production our Clink checkout webhook integration.",
-    validationInput: "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
+    validationInput: WEBHOOK_VALIDATION_INPUT,
     semanticValidation: {
       ownershipBoundary: true,
       environmentCompleteness: true,
@@ -313,6 +420,10 @@ async function main() {
   check(prodValid.runtimeState?.promotionStatus === "approved", "successful validation should approve promotion");
   check(prodValid.runtimeState?.resolvedEnvironment === "production", "runtime state should resolve to production after promotion approval");
   check(prodValid.runtimeState?.stage === "ready", "runtime state should stay ready after approved promotion");
+  check(
+    !prodValid.notes.some((item) => item.includes("4242424242424242")),
+    "approved production integration should not include sandbox card-binding test card guidance"
+  );
 
   // Integration: production with skipValidation
   const prodSkipped = await runSkillRuntime({
@@ -396,6 +507,14 @@ async function main() {
   check(sandboxSwitch.environment?.targetEnvironment === "sandbox", "explicit sandbox signal should resolve to sandbox");
   check(sandboxSwitch.productionValidation === null, "sandbox signal should not trigger production validation");
 
+  const uatPaymentValidation = await runSkillRuntime({
+    prompt: "After integration, help me do sandbox UAT payment validation.",
+    docsFallbackSource: docsFallback,
+  });
+  check(uatPaymentValidation.route === "merchant_standard_integration", "sandbox UAT payment validation should stay on standard integration route");
+  check(uatPaymentValidation.notes.some((item) => item.includes("4242424242424242")), "sandbox UAT payment validation should include card-binding test card note");
+  check(uatPaymentValidation.notes.some((item) => item.includes("real UAT payment")), "sandbox UAT payment validation should preserve real-payment truthfulness note");
+
   const elementsReact = await runSkillRuntime({
     prompt: "Help me integrate @clink-ai/clink-elements in a React checkout with loadClinkElements and paymentMethod.",
     docsFallbackSource: docsFallback,
@@ -410,12 +529,22 @@ async function main() {
   check(elementsReact.artifacts.some((item) => item.name === "elements_event_mapping"), "Elements prompt should emit elements_event_mapping");
   check(elementsReact.artifacts.some((item) => item.name === "elements_error_handling_checklist"), "Elements prompt should emit elements_error_handling_checklist");
   check(elementsReact.artifacts.some((item) => item.name === "elements_host_ui_todo"), "Elements prompt should emit elements_host_ui_todo");
+  check(elementsReact.artifacts.some((item) => item.name === "elements_brand_theme_plan"), "Elements prompt should emit elements_brand_theme_plan");
+  check(
+    getArtifactSummary(elementsReact.artifacts, "elements_brand_theme_plan").includes("site colors") &&
+      getArtifactSummary(elementsReact.artifacts, "elements_brand_theme_plan").includes("presetOptions"),
+    "elements_brand_theme_plan should describe site color discovery and presetOptions mapping"
+  );
   check(elementsReact.artifacts.some((item) => item.name === "elements_lifecycle_checklist"), "Elements prompt should emit elements_lifecycle_checklist");
   check(elementsReact.artifacts.some((item) => item.name === "elements_server_client_boundary"), "Elements prompt should emit elements_server_client_boundary");
   check(elementsReact.artifacts.some((item) => item.name === "integration_checklist"), "Elements prompt should preserve standard integration_checklist");
   check(elementsReact.artifacts.some((item) => item.name === "webhook_handler_checklist"), "Elements prompt should preserve webhook_handler_checklist");
   check(elementsReact.artifacts.some((item) => item.name === "merchant_order_mapping"), "Elements prompt should preserve merchant_order_mapping");
   check(elementsReact.notes.some((item) => item.includes("embedded payment component")), "Elements prompt should add embedded payment component note");
+  check(
+    elementsReact.notes.some((item) => item.includes("presetOptions") && item.includes("site colors")),
+    "Elements prompt should add automatic site-style adaptation note"
+  );
 
   const elementsFromContext = await runSkillRuntime({
     prompt: "Help me integrate this checkout component.",
@@ -497,7 +626,7 @@ async function main() {
 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "clink-runtime-"));
   const validationFile = path.join(tempRoot, "webhook.txt");
-  fs.writeFileSync(validationFile, "We will use Merchant Dashboard > Developers > Webhooks, subscribe to required events, register an HTTPS endpoint, select the registered endpoint, copy the webhook signing key, and store it as CLINK_WEBHOOK_SIGNING_KEY, verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.", "utf8");
+  fs.writeFileSync(validationFile, WEBHOOK_VALIDATION_INPUT, "utf8");
   const cliConfirmedSkipArgs = [
     runtimeScript,
     "--prompt",

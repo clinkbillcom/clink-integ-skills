@@ -19,20 +19,38 @@ This file is for final review and self-check. It is not the primary workflow doc
 - did the design identify the backend language or ask for it when needed
 - did the design clarify registered vs non-registered product mode
 - for registered product mode, does it explain where active `productId` and `priceId` come from
+- when existing site products, prices, or subscriptions exist, does it use agent-discovered `clink-catalog.json` plus `clink catalog validate/plan/import` instead of manual ID copying
+- does product discovery inspect running APIs/pricing DOM before source/configuration, and ask the user only after those sources are exhausted
+- does the generated `clink-catalog.json` include one product image source per product: `imageId`, `imageUrl`, or `imageFile`
+- does it avoid putting URL strings in `imageId`, using `imageUrl` for URLs and `imageFile` for local public/static assets
 - for non-registered product mode, does it explain how merchant-defined line items are built into `priceDataList`
 - for non-registered product mode, does it keep merchant-specific business inputs in the merchant order model
 - for subscription purchases, does it explain whether the flow should create a new checkout session or route to customer portal
 - does checkout map merchant `order_id` to `merchantReferenceId`
 - does the design avoid treating `merchantReferenceId` as an idempotency key
 - does the design keep `originalAmount` aligned with the merchant-defined checkout payload
-- does webhook implementation include dashboard subscription and endpoint registration
-- when a webhook signing key is requested or configured, does the output tell the user to get it from `Merchant Dashboard > Developers > Webhooks` by registering or selecting the webhook endpoint and copying the endpoint signing key
+- does webhook implementation include endpoint registration through `clink webhook endpoint ensure --events core --save-secret --json` or a clearly identified fallback
+- when Dashboard webhook visibility or manual fallback is mentioned, does the output identify `Merchant Dashboard > Developers > Webhooks` while keeping `clink webhook endpoint ensure` as the default path
+- does webhook setup sync the returned or rotated signing secret into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+- for local `.env` apps, does webhook setup use `clink webhook endpoint ensure --save-secret --sync-env-file <env-file>` or an equivalent automated env write
+- does webhook setup restart or redeploy the service after syncing the signing secret
+- does webhook setup explain that URL changes require rerunning endpoint ensure and resyncing the signing secret
+- does the output avoid asking for `CLINK_WEBHOOK_SIGNING_KEY` as an initial user-provided secret
+- for local desktop setup without an existing Secret Key, does it use `clink login` only for human-assisted Dashboard login and then `clink dashboard apikey ensure-secret --save --json`
+- for cloud, low-code, sandbox, or browserless setup, does it ask only for `CLINK_SECRET_KEY` and then use `clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox`
+- does it verify the CLI request domain with `clink env list` or `clink env show <name> --json` before write commands
+- if a custom request domain is needed, does it use `clink env add <name> --api-base-url <url>` and then `--env <name>` or `CLINK_ENV` instead of scattering raw URLs through generated code
+- are `--base-url` and `CLINK_BASE_URL` treated as documented one-off overrides, not as a way to bypass production validation
+- after `CLINK_SECRET_KEY` is configured, does it avoid requiring a Dashboard Console token for catalog import, checkout/subscription APIs, webhook endpoint management, doctor, smoke-test, or local webhook commands
 - when a Secret Key is requested or configured, does the output tell the user to get it from `Merchant Dashboard > Developers > API Keys` by clicking `Initialize Key`, copying it once, and storing it securely
 - does the output avoid asking the user to paste real webhook signing keys or Secret Keys into chat, generated source code, docs, logs, or public repositories
 - does webhook coverage include subscription lifecycle events when the product mode is subscription-based
 - does webhook coverage include `order.refunded` or equivalent refunded-state handling when that state exists in the merchant order model
 - does webhook implementation include signature verification, idempotency, retry handling, and out-of-order tolerance
+- does webhook reconciliation match both `merchantReferenceId` and `sessionId` when both are available, and quarantine mismatches instead of relying on one field
 - does the design avoid treating `successUrl` as the only confirmation signal
+- does real-payment validation require local order paid/completed plus entitlement/fulfillment completion, not just webhook HTTP 200
+- after a sandbox/UAT integration is ready for card-binding payment testing, does the final delivery remind the user about test card `4242424242424242`, any 3-digit CVC, and any future expiry date without presenting it as production guidance
 - does the design clearly separate payment confirmation from merchant fulfillment when downstream delivery exists
 - does refund handling describe lifecycle behavior instead of assuming unsupported create APIs
 
@@ -60,6 +78,7 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does it handle known SDK errors and give the user a retry or session recreation path
 - does it document whether SDK skeleton or host skeleton is used
 - does it check host containers for stable sizing, scrolling, and mobile button placement
+- does it inspect the merchant site's colors, design tokens, CSS variables, theme config, computed styles, and radius scale, then map them into Elements `presetOptions`
 
 ## New User Onboarding Checks
 
@@ -69,7 +88,7 @@ This file is for final review and self-check. It is not the primary workflow doc
 - does it tell the user to confirm merchant selection and merchant profile under `Settings > Merchant`
 - does it explain team access through `Settings > Users` and avoid giving Developer access to roles that docs say do not have it
 - does it include Secret Key retrieval through `Merchant Dashboard > Developers > API Keys` and `Initialize Key`
-- does it include webhook registration and signing key retrieval through `Merchant Dashboard > Developers > Webhooks`
+- does it include CLI webhook endpoint ensure and signing-secret sync instead of defaulting to manual Dashboard webhook setup
 - does it distinguish registered product mode from non-registered product mode before first checkout setup
 - does it explain that subscription recurring payments require pre-created products according to the checkout docs
 - does it route the user to standard integration, generic agent integration, OpenClaw integration, or validation after onboarding

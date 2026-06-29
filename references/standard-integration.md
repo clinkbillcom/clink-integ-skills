@@ -30,18 +30,26 @@ Before creating a checkout session, determine which product mode the merchant us
 
 #### Registered Product Mode
 
-Use this mode when the merchant already uses products and prices created in the Clink dashboard.
+Use this mode when the merchant already uses products and prices created in Clink, either through the Dashboard or through `clink catalog import`.
 
 Expected behavior:
 
 - use `productId`
 - use `priceId`
 - ensure the IDs match the records configured in Clink
-- fetch active products and active prices from Clink when building the merchant product selection flow
+- fetch or import active products and active prices from Clink when building the merchant product selection flow
 
 Do not invent `productId` or `priceId`.
 
-In a typical registered-product implementation, the merchant frontend selects from products and prices that the merchant backend or frontend fetched from Clink first.
+In a typical registered-product implementation, the merchant frontend selects from products and prices that the merchant backend or frontend fetched from Clink first. If the merchant's site already has a pricing page, CMS plan list, or subscription catalog, the agent should generate `clink-catalog.json` and use `clink catalog validate`, `clink catalog plan`, and `clink catalog import` before asking the user to manually copy product or price IDs.
+
+Product discovery order:
+
+1. Inspect running application APIs, rendered pricing DOM, hydrated JSON, and visible pricing page state.
+2. Inspect source/configuration, CMS adapters, route data, seed data, constants, and public/static product assets.
+3. Ask the user only for unresolved business decisions or ambiguous products.
+
+The `clink-catalog.json` artifact must include exactly one image source for every product: `imageId`, `imageUrl`, or `imageFile`. Use `imageUrl` for URLs and `imageFile` for local public/static assets; do not put URLs in `imageId`.
 
 #### Non-Registered Product Mode
 
@@ -111,28 +119,75 @@ Do not describe the frontend as independent from the merchant backend. The backe
 
 ### Step 5: Configure And Implement Webhooks
 
-Webhook implementation includes both dashboard setup and server-side code.
+Webhook implementation includes endpoint setup, signing secret configuration, and server-side code.
 
-#### Dashboard Setup
+#### CLI Endpoint Setup
 
-The workflow should start in:
+The workflow should prefer `clink-integ-cli` with Secret Key authentication.
 
-- `Merchant Dashboard > Developers > Webhooks`
+The Dashboard location for viewing existing endpoint records is `Merchant Dashboard > Developers > Webhooks`, but new standard integration guidance should stay CLI-first and use the Secret Key API through `clink webhook endpoint ensure` whenever available.
 
-The merchant should:
+First ensure the CLI can authenticate:
 
-1. subscribe to required events
-2. register the HTTPS webhook endpoint
-3. open the registered webhook endpoint details and copy the webhook signing key
-4. store the webhook signing key in the merchant server's secret manager or environment configuration
+```bash
+clink env show sandbox --json
+clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox
+clink auth status --json
+```
 
-When asking a user for a webhook signing key, also tell them the retrieval path and method: go to `Merchant Dashboard > Developers > Webhooks`, register or select the HTTPS endpoint, then copy the signing key shown for that endpoint. Do not ask the user to paste the real signing key into chat or generated code; ask them to configure a placeholder such as `CLINK_WEBHOOK_SIGNING_KEY`.
+Use `sandbox` unless the user or maintainer has explicitly provided a registered custom non-production CLI environment. For a custom request domain, first run `clink env add <name> --api-base-url <url>`, confirm it with `clink env show <name> --json`, and then pass `--env <name>` or set `CLINK_ENV=<name>`. Use `--base-url` or `CLINK_BASE_URL` only as a documented one-off override.
+
+Then configure the public HTTPS endpoint:
+
+```bash
+clink webhook endpoint ensure \
+  --url <public-webhook-url> \
+  --events core \
+  --save-secret \
+  --sync-env-file .env.local \
+  --json
+```
+
+`clink dashboard webhook ensure` is only a compatibility alias. New guidance should use `clink webhook endpoint ensure`.
+
+The merchant or agent should:
+
+1. use an existing public HTTPS domain when available
+2. use a tunnel only for pure local `localhost` development
+3. subscribe to `--events core` or the smallest event-name list required by the product flow
+4. save or capture the returned signing secret
+5. store the signing secret in the merchant server's secret manager or environment configuration as `CLINK_WEBHOOK_SIGNING_KEY`
+6. restart or redeploy the server after updating the signing secret
+7. rerun endpoint ensure and repeat the sync when the webhook URL changes
+
+Do not ask the user to provide `CLINK_WEBHOOK_SIGNING_KEY` at the beginning of the integration. The signing key should come from `clink webhook endpoint ensure --save-secret`. If a platform Secret API requires plaintext, use `--show-secret` only in the controlled write step and never include the raw value in the final answer.
+
+If an existing endpoint cannot return its plaintext signing secret, `ensure --save-secret` may rotate the secret. Treat that as immediate invalidation of the previous runtime secret and sync the new value before verification.
 
 ### Step 5a: Configure Server Secret Key
 
 Server-side API calls require a Clink Secret Key.
 
-When asking a user for a Secret Key, also tell them the retrieval path and method: go to `Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, then copy and securely store the Secret Key because it is displayed only once. Do not put the real Secret Key in frontend code, chat, generated source, docs, or public repositories; use a secret manager or environment variable such as `CLINK_SECRET_KEY`.
+If a Secret Key already exists in the runtime environment, configure the CLI profile with:
+
+```bash
+clink env show sandbox --json
+clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox
+clink auth status --json
+```
+
+If the agent is running in a local desktop environment with a usable browser and no Secret Key has been provided, bootstrap the key with:
+
+```bash
+clink login
+clink dashboard whoami --json
+clink dashboard apikey ensure-secret --save --json
+clink auth status --json
+```
+
+The human only completes Dashboard login in the opened browser. The CLI then finds or initializes the sandbox Secret Key and saves it to the CLI profile. If the merchant app runtime needs `CLINK_SECRET_KEY`, use `clink dashboard apikey ensure-secret --save --show-secret --json` only in a controlled local secret-write step and write the value to an ignored `.env`, platform Secret, or secret manager.
+
+In browserless, cloud IDE, low-code, or sandbox environments where `clink login` cannot run, ask only for `CLINK_SECRET_KEY`. Tell the user the retrieval path and method: go to `Merchant Dashboard > Developers > API Keys`, click `Initialize Key`, then copy and securely store the Secret Key because it is displayed only once. Do not put the real Secret Key in frontend code, chat, generated source, docs, logs, public repositories, or final answers.
 
 #### Server Implementation
 
@@ -146,13 +201,17 @@ The merchant backend should:
 - implement idempotency
 - handle retries safely
 - tolerate out-of-order delivery
+- reconcile payment events against the local checkout/order using both `merchantReferenceId` and `sessionId` when both are present
+- reject, quarantine, or escalate events where `merchantReferenceId` and `sessionId` resolve to different local orders
 
 Primary event groups for this path:
 
-- session
-- order
-- subscription
-- refund
+- `session.complete`
+- `order.succeeded`
+- `order.failed`
+- `refund.succeeded`
+- `subscription.created`
+- `invoice.paid`
 
 Prefer backend webhook-driven state synchronization over relying only on frontend redirects.
 
@@ -184,6 +243,10 @@ A robust merchant flow may also:
 - use iframe callback or redirect return only as a UX handoff, not as authoritative payment confirmation
 
 Do not describe `successUrl` alone as the authoritative payment confirmation signal.
+
+Webhook HTTP 200 is not enough to call a real payment complete. A real-payment validation must also confirm the local order matched by both `merchantReferenceId` and `sessionId` is paid/completed and the merchant entitlement, credits, shipment, download access, or other fulfillment has completed.
+
+For sandbox/UAT card-binding payment tests after the integration is ready, remind the user that test card `4242424242424242` can be used with any 3-digit CVC and any future expiry date. Do not include this test-card guidance in production payment instructions.
 
 ### Step 7: Trigger Merchant Fulfillment After Payment
 

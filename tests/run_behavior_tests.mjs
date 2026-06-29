@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixturesDir = path.join(repoRoot, "tests", "fixtures");
 const cases = JSON.parse(fs.readFileSync(path.join(repoRoot, "tests", "cases.json"), "utf8")).cases;
 

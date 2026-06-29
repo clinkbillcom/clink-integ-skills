@@ -79,7 +79,28 @@ For server-side API calls, tell the user to get the Secret Key from:
 - click `Initialize Key`
 - copy and securely store the Secret Key because it is displayed only once
 
-For generated code or configuration, use a placeholder such as `CLINK_SECRET_KEY`. Do not ask the user to paste a real Secret Key into chat, source code, docs, logs, or public repositories.
+For generated code or configuration, use a placeholder such as `CLINK_SECRET_KEY`. Do not ask the user to paste a real Secret Key into source code, docs, logs, final answers, or public repositories.
+
+In browserless, cloud IDE, low-code, or sandbox environments, the allowed manual step is for the user to provide the Secret Key to the agent so it can store it in the secure runtime environment and CLI profile:
+
+```bash
+clink env show sandbox --json
+clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox
+clink auth status --json
+```
+
+If the user or maintainer provides a named non-production request domain, register it with `clink env add <name> --api-base-url <url>` first, confirm it with `clink env show <name> --json`, and use `--env <name>` or `CLINK_ENV=<name>` for CLI commands. Keep the onboarding readiness language as sandbox unless production approval and the production validation gate apply.
+
+In a local desktop environment with an available browser, the agent may bootstrap the Secret Key through `clink login` instead:
+
+```bash
+clink login
+clink dashboard whoami --json
+clink dashboard apikey ensure-secret --save --json
+clink auth status --json
+```
+
+The human only completes Dashboard login in the opened browser. The CLI then finds or initializes the sandbox Secret Key and saves it to the CLI profile. If the app runtime needs `CLINK_SECRET_KEY`, use `clink dashboard apikey ensure-secret --save --show-secret --json` only inside a controlled local secret-write step, then write the value to an ignored `.env`, platform Secret, or secret manager without exposing it in chat or final output.
 
 When frontend embedded checkout is in scope, distinguish publishable keys from Secret Keys. Browser code may use a publishable key; it must never expose a Secret Key.
 
@@ -89,8 +110,9 @@ Ask whether the merchant wants registered product mode or non-registered product
 
 Registered product mode:
 
-- use when the merchant configures products and prices in the Clink dashboard
-- guide the user to `Products`, click `Add`, enter product name and image, then add price details
+- use when the merchant configures products and prices in Clink, either through the Dashboard or through `clink catalog import`
+- if the merchant already has a pricing page, CMS catalog, or subscription plan list, have the agent generate `clink-catalog.json` and run `clink catalog validate`, `clink catalog plan`, and `clink catalog import`
+- if the merchant is configuring a single item manually, guide the user to `Products`, click `Add`, enter product name and image, then add price details
 - required for subscription-based recurring payments according to the checkout session docs
 - use `productId` and `priceId` from Clink; do not invent them
 
@@ -100,17 +122,31 @@ Non-registered product mode:
 - use `priceDataList` for name, quantity, amount, and currency
 - keep merchant-specific order and fulfillment data in the merchant system
 
-### Step 5: Webhook Setup
+### Step 5: Webhook Endpoint Setup
 
-For webhook setup, tell the user to:
+For webhook setup, prefer the Secret Key API through `clink-integ-cli`.
 
-1. go to `Merchant Dashboard > Developers > Webhooks`
-2. click `Add`
-3. enter an HTTPS endpoint
-4. select event types to monitor
-5. register the endpoint
-6. copy the webhook signing key that becomes available after endpoint registration
-7. store the signing key as a secret such as `CLINK_WEBHOOK_SIGNING_KEY`
+The Dashboard location for viewing or manually checking webhook endpoint records is `Merchant Dashboard > Developers > Webhooks`, but onboarding guidance should not default to Dashboard-only webhook setup when the CLI can register the endpoint and save the signing secret.
+
+Do not initially ask the user for `CLINK_WEBHOOK_SIGNING_KEY`. After the server exposes a public HTTPS webhook route, run:
+
+```bash
+clink webhook endpoint ensure \
+  --url <public-webhook-url> \
+  --events core \
+  --save-secret \
+  --json
+```
+
+Then:
+
+1. sync the returned or rotated signing secret into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+2. restart or redeploy the service
+3. verify the webhook handler with `clink webhook simulate`, `clink webhook sign`, or `clink webhook verify`
+
+If the current CLI still does not support `clink webhook endpoint ensure` after updating to the latest GitHub build, stop and report the CLI capability gap instead of silently sending the user to configure webhooks in the Dashboard. New guidance should not present webhook endpoint management as Dashboard-only.
+
+If the webhook URL changes, rerun `clink webhook endpoint ensure --save-secret --json`, sync the latest signing secret, and restart or redeploy again.
 
 Webhook implementation must verify:
 
@@ -157,10 +193,11 @@ A good new user onboarding output should usually include:
 - account and MFA checklist
 - merchant and user access checklist
 - Secret Key retrieval path and safe storage guidance
+- local desktop `clink login` bootstrap path and browserless manual Secret Key path
 - sandbox auto-approval and production approval/support guidance
 - sandbox invite code `JUSTCLINK`
 - product mode decision
-- webhook registration and signing key checklist
+- CLI webhook endpoint ensure checklist and signing-secret sync
 - first checkout session checklist
 - clear next-step routing to standard integration, generic agent integration, OpenClaw integration, or validation
 

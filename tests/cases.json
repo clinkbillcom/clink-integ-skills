@@ -74,10 +74,11 @@
       "scenario": "merchant_standard_integration",
       "prompt": "Help me implement Clink webhook support in my merchant backend.",
       "must_include": [
-        ["Merchant Dashboard > Developers > Webhooks", "Developers > Webhooks", "Dashboard > Developers > Webhooks"],
-        ["subscribe to required events", "select the event types", "subscribe to", "select the events you wish to monitor", "select the event types to monitor"],
-        ["register webhook endpoint", "register an https endpoint", "enter your https endpoint", "register your https endpoint", "register your endpoint"],
-        ["obtain webhook signing key", "copy the webhook signing key", "signing key", "webhook signing key", "copy the signing key"],
+        ["clink webhook endpoint ensure", "webhook endpoint ensure"],
+        ["--events core", "subscribe to required events", "select the event types", "subscribe to"],
+        ["--save-secret", "save-secret"],
+        ["sync the returned", "sync the signing", "CLINK_WEBHOOK_SIGNING_KEY", "webhook signing key"],
+        ["restart", "redeploy"],
         "X-Clink-Timestamp",
         "X-Clink-Signature",
         "idempotency",
@@ -154,7 +155,8 @@
         "idempotency",
         ["retry", "retries", "retry logic", "delivery up to 10 times"],
         ["out-of-order", "out of order", "not guaranteed to arrive in order", "arriving in a specific order"],
-        ["dashboard configuration", "webhook registration", "register your https endpoint", "developers > webhooks", "signing key obtained from the clink dashboard", "clink dashboard"]
+        ["clink webhook endpoint ensure", "webhook endpoint ensure", "endpoint registration", "register your https endpoint"],
+        ["CLINK_WEBHOOK_SIGNING_KEY", "signing key sync", "sync the signing secret", "webhook signing key"]
       ],
       "must_not_include": [
         "only style feedback"

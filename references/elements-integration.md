@@ -96,6 +96,41 @@ const clink = await loadClinkElements({
 
 Default generated guidance should use `sandbox` unless production has passed the production validation gate.
 
+## Brand Matching And Theme Adaptation
+
+When the merchant website's visual style is discoverable, the agent should automatically adapt the Elements payment UI to the site's color and spacing system instead of leaving generic defaults.
+
+Recommended discovery order:
+
+1. Inspect existing design tokens, CSS variables, Tailwind or theme config, and component-library theme settings.
+2. Inspect rendered or source styles for primary buttons, links, price cards, checkout panels, focus rings, border radius, and surface backgrounds.
+3. Use computed styles from the running page when a browser is available.
+4. Ask the user only when the site has multiple conflicting brand themes or the payment page should intentionally differ from the rest of the site.
+
+Map the discovered style into frontend-safe `presetOptions`:
+
+```ts
+const clink = await loadClinkElements({
+  publishKey,
+  environment: 'sandbox',
+  sessionId,
+  presetOptions: {
+    locale,
+    theme: detectedTheme,
+    primaryColor: detectedPrimaryColor,
+    radius: {
+      components: detectedControlRadius,
+      card: detectedPanelRadius,
+    },
+    section: {
+      hideSkeleton: useHostManagedSkeleton,
+    },
+  },
+});
+```
+
+Keep the host checkout shell and SDK-controlled payment area visually coherent: match the primary action color, focus treatment, neutral surfaces, spacing density, and radius scale. Do not infer a palette from a logo alone when the page's actual checkout or pricing UI provides stronger signals.
+
 ## Element Lifecycle
 
 - one `ClinkElements` instance maps to one checkout session
@@ -241,3 +276,4 @@ An Elements answer or code review should verify:
 - `amount-change` drives displayed amount, product, promotion, and tax UI
 - `session-success` and `session-pending` stay UX signals only
 - webhook-driven backend state remains the source of truth
+- site colors, design tokens, computed styles, and radius scale are inspected before setting Elements `presetOptions`

@@ -2,9 +2,10 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 import { getCacheStatus, loadOfficialDocs } from "../lib/docs-runtime.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceFile = path.join(repoRoot, "tests", "fixtures", "public-docs", "llms-full.txt");
 
 let checks = 0;

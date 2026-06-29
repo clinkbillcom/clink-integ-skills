@@ -1,10 +1,11 @@
 import fs from "fs";
 import path from "path";
 import process from "process";
+import { fileURLToPath } from "url";
 import { loadOfficialDocs } from "../lib/docs-runtime.mjs";
 import { defaultDocsFallback, detectRoute, requiresDocsGate, resolveDocsRoot } from "../lib/skill-runtime.mjs";
 
-const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const testsDir = path.join(repoRoot, "tests");
 const liveDir = path.join(testsDir, "live", "latest");
 const docsRoot = resolveDocsRoot(repoRoot);
@@ -242,7 +243,7 @@ async function buildInstructions(testCase) {
     .map((label) => `- ${label}`)
     .join("\n");
 
-  return `You are simulating the behavior of the local skill repository "clink-dev-skill".
+  return `You are simulating the behavior of the local skill repository "clink-integ-skill".
 
 Follow the skill materials below exactly as the governing instructions for this task.
 
