@@ -97,6 +97,8 @@ Selection priority for CLI requests:
 
 `--base-url <url>` and `CLINK_BASE_URL` override the resolved API base URL for one-off debugging. Treat them as temporary overrides, document why they are used, and do not use them to bypass the production validation gate. If the override points at production or a production-like domain, run the production validation workflow first.
 
+Authenticated `clink api request` input is not another environment override. Pass only a relative API path that resolves below the configured base pathname. Absolute URLs, scheme-relative URLs, backslashes, parent traversal, and encoded path escapes must be rejected; neither the configured origin nor its API base path may be replaced by request input.
+
 ## Authentication
 
 Prefer Secret Key authentication.
@@ -140,6 +142,8 @@ node "$CLINK_INTEG_CLI" dashboard apikey ensure-secret --save --show-secret --js
 Parse the value locally and write it to the runtime secret destination. Do not print the raw Secret Key in chat, generated docs, logs, source code, README files, test fixtures, or the final answer.
 
 After this point, product catalog import, checkout/subscription calls, webhook endpoint management, API request, doctor, smoke-test, and local webhook commands should use Secret Key authentication and should not require a Dashboard Console token.
+
+On POSIX systems, treat the CLI profile and every `.env` file populated with a Secret Key or webhook signing secret as private files with mode `0600`. An existing broader mode such as `0644` must be tightened when the secret is written; do not rely only on the process umask.
 
 ### Path B: Cloud, Low-Code, Sandbox, Or Browserless
 
@@ -228,6 +232,8 @@ Implement server-side routes for:
 - subscription creation when the product flow needs recurring payments
 - webhook reception and signature verification
 
+Keep the trusted local `clink checkout` commands available for operator-controlled workflows that intentionally supply a complete payload. Do not expose that trust model through a generated public starter route. A public starter accepts only a server-defined `priceKey` or `planKey`; its server-side catalog or order loader owns the amount, currency, product and price IDs, `merchantReferenceId`, success/cancel URLs, and payment settings. Replace the example allowlist with the merchant's server-side catalog or order store before production. The client may choose an allowed item, but it must not define or override price-bearing fields or identifiers.
+
 The server must send:
 
 ```text
@@ -249,7 +255,7 @@ Primary command:
 ```bash
 clink webhook endpoint ensure \
   --url <public-webhook-url> \
-  --events core \
+  --events commerce \
   --save-secret \
   --sync-env-file .env.local \
   --json
@@ -260,13 +266,24 @@ Use `--show-secret` only when a controlled platform Secret API requires the plai
 ```bash
 clink webhook endpoint ensure \
   --url <public-webhook-url> \
-  --events core \
+  --events commerce \
   --save-secret \
   --show-secret \
   --json
 ```
 
-`--events core` uses event names, not Dashboard numeric event codes:
+Select the event scope from the product flow, not from Dashboard numeric event codes:
+
+- complete charging or subscription integration: `--events commerce`
+- one-time checkout: `--events checkout,disputes`
+- minimum subscription integration: `--events checkout,subscriptions,disputes`
+- saved payment-method synchronization: add `payment-methods` to the narrower combination, or use `commerce`
+
+Endpoint ensure reads runtime `GET /webhook/events` and validates every preset or explicit event before writing. It merges with the endpoint's existing events by default. Use `--allow-remove-events` only when replacement and removal of existing events are explicitly authorized; the CLI reads the endpoint back after the update and verifies the final set.
+
+`commerce` is a stable, versioned 31-event preset. It must not silently expand when the runtime Catalog adds an event. In particular, a future `payment_method.deleted` may be selected through dynamic `all` or as an explicit event, but does not enter stable `commerce` until a later versioned preset decision.
+
+`core` is compatibility-only or for a minimal demo. It contains exactly:
 
 - `session.complete`
 - `order.succeeded`
@@ -274,6 +291,8 @@ clink webhook endpoint ensure \
 - `refund.succeeded`
 - `subscription.created`
 - `invoice.paid`
+
+Warning: `core` omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`. It is not a complete charging, subscription, or production recommendation. Migrate existing `core` endpoints to `commerce` for complete coverage.
 
 The CLI compatibility alias `clink dashboard webhook ensure` may exist for older scripts, but new guidance should use `clink webhook endpoint ensure`.
 
@@ -283,7 +302,7 @@ For cloud-hosted platforms, low-code platforms, cloud IDEs, sandbox runtimes, an
 
 - If `CLINK_SECRET_KEY` is already configured as a backend/platform Secret, do not tell the user to run a local bootstrap script just to copy `CLINK_WEBHOOK_SIGNING_KEY`.
 - Do not present "run this script and paste the printed signing key into Secrets" as the normal completed integration state.
-- Install the CLI in the agent environment, verify `clink webhook endpoint ensure --help` includes `--show-secret` and `--sync-env-file`, deploy the webhook route to obtain the public HTTPS URL, then run `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --show-secret --json`.
+- Resolve the bundled CLI in the agent environment, verify `clink webhook endpoint ensure --help` includes `--show-secret` and `--sync-env-file`, deploy the webhook route to obtain the public HTTPS URL, then run `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --show-secret --json` for a complete charging integration.
 - If the agent has platform Secret write access, write the returned or rotated signing secret into the backend Secret named `CLINK_WEBHOOK_SIGNING_KEY`, then restart or redeploy the service.
 - Only when the platform does not allow the agent to write Secrets, and no platform Secret API/tool is available, list a single remaining human step to add `CLINK_WEBHOOK_SIGNING_KEY` to the backend Secret manager. State that the blocker is platform Secret write permission, not a Clink CLI limitation.
 
@@ -329,7 +348,7 @@ For local `.env` based apps, prefer:
 ```bash
 clink webhook endpoint ensure \
   --url <public-webhook-url> \
-  --events core \
+  --events commerce \
   --save-secret \
   --sync-env-file .env.local \
   --json
@@ -341,17 +360,48 @@ When an existing endpoint cannot return the plaintext signing secret, `ensure --
 
 Every webhook URL change requires rerunning `clink webhook endpoint ensure --save-secret --json`, syncing the new signing secret, and restarting or redeploying.
 
+## Canonical Fixtures And UAT Boundary
+
+Generate the default local Merchant Webhook fixture without selecting a profile:
+
+```bash
+clink webhook fixture invoice.paid
+```
+
+Its canonical envelope has an `event_` ID, `object: "event"`, an integer Unix-millisecond `created`, and the resource inside an object-valued `data.object`. Invoice resources use `items`; the default outer envelope has neither `lineItems` nor `livemode`:
+
+```json
+{
+  "id": "event_invoice_paid_test",
+  "object": "event",
+  "created": 1736942400000,
+  "type": "invoice.paid",
+  "data": {
+    "object": {
+      "invoiceId": "inv_test_123",
+      "items": []
+    }
+  }
+}
+```
+
+The flattened legacy shape remains available only through explicit `--fixture-profile legacy`. It is deprecated and is for old compatibility tests, never the default contract.
+
+`clink webhook fixture` and `clink webhook simulate` generate local deterministic inputs. They can validate parsing, signing, deduplication, and response behavior, but they are not evidence of a real Clink sandbox Merchant Webhook delivery. Claim real sandbox webhook UAT only after an actual Clink-to-endpoint delivery is observed and reconciled.
+
 ## Webhook Handler Requirements
 
 The webhook route must:
 
-- preserve the raw request body before JSON parsing
-- read `X-Clink-Timestamp`
+- preserve the unmodified raw request body and verify its signature before JSON parsing or profile normalization
+- read `X-Clink-Timestamp` as an integer Unix-seconds or Unix-milliseconds value and reject non-integers, stale values, and future values outside a 300-second window
 - read `X-Clink-Signature`
 - verify HMAC SHA-256 over `X-Clink-Timestamp + "." + rawBody`
 - compare signatures safely
-- reject stale or replayed deliveries
-- process events idempotently
+- validate the canonical envelope and require an object-valued `data.object`
+- reject malformed payloads and unknown event types with a non-2xx response rather than acknowledging them silently
+- reject deliveries outside the timestamp window; the window limits signature replay exposure but is not delivery deduplication
+- record deliveries in a durable Inbox keyed by `event.id` and deduplicate repeated deliveries even when their timestamp is inside the accepted window
 - handle retries safely
 - tolerate out-of-order events
 - reconcile local orders using both `merchantReferenceId` and `sessionId` when both are available; never rely on only one field when the local checkout record contains both
@@ -370,7 +420,15 @@ Recommended validation order:
 clink doctor --json
 ```
 
-3. Signed simulated webhook:
+3. Canonical local fixture inspection:
+
+```bash
+clink webhook fixture invoice.paid
+```
+
+Confirm `object="event"`, integer millisecond `created`, object-valued `data.object`, Invoice `items`, no `lineItems`, and no default outer `livemode`.
+
+4. Signed local simulated webhook:
 
 ```bash
 clink webhook simulate order.succeeded \
@@ -379,18 +437,19 @@ clink webhook simulate order.succeeded \
   --json
 ```
 
-4. CLI smoke test:
+5. CLI smoke test:
 
 ```bash
 clink smoke-test --webhook-url <public-webhook-url>/api/clink/webhook --json
 ```
 
-5. Real sandbox checkout session creation.
-6. Real sandbox test payment only after someone opens the returned `checkoutUrl` and completes payment.
+6. Real sandbox checkout session creation.
+7. Real sandbox test payment and Merchant Webhook UAT only after someone opens the returned `checkoutUrl`, completes payment, and an actual Clink-to-endpoint delivery is observed.
 
 After the sandbox integration is ready for card-binding payment testing, remind the user that the card number `4242424242424242` can be used with any 3-digit CVC and any future expiry date. This is test-payment guidance only; never present it as production card guidance.
 
 Never claim a real payment webhook was completed unless a real sandbox test payment was completed.
+Never use a fixture, local replay, signed simulation, or smoke test to claim that real Clink sandbox Merchant Webhook UAT passed.
 Webhook 200 is not sufficient for real-payment completion. The final real-payment checklist must confirm the local order matched by both `merchantReferenceId` and `sessionId` is paid/completed, and the merchant entitlement, credits, shipment, download access, or other fulfillment is complete.
 
 ## Delivery Checklist

@@ -91,6 +91,8 @@ clink auth status --json
 
 If the user or maintainer provides a named non-production request domain, register it with `clink env add <name> --api-base-url <url>` first, confirm it with `clink env show <name> --json`, and use `--env <name>` or `CLINK_ENV=<name>` for CLI commands. Keep the onboarding readiness language as sandbox unless production approval and the production validation gate apply.
 
+Authenticated `clink api request` accepts only a relative path below the selected environment's API base. Do not pass an absolute URL, scheme-relative URL, backslash path, parent traversal, or any input that can override the configured origin or escape its base pathname.
+
 In a local desktop environment with an available browser, the agent may bootstrap the Secret Key through `clink login` instead:
 
 ```bash
@@ -101,6 +103,8 @@ clink auth status --json
 ```
 
 The default CLI is the offline bundle in `vendor/clink-integ-cli/clink-integ-cli`; do not install it from GitHub or npm. The bundle is browser-free; use this local `clink login` path only when optional Playwright support has already been provisioned offline outside the bundle. The human only completes Dashboard login in the opened browser. The CLI then finds or initializes the sandbox Secret Key and saves it to the CLI profile. If the app runtime needs `CLINK_SECRET_KEY`, use `clink dashboard apikey ensure-secret --save --show-secret --json` only inside a controlled local secret-write step, then write the value to an ignored `.env`, platform Secret, or secret manager without exposing it in chat or final output.
+
+On POSIX systems, the CLI profile and any `.env` file containing a Secret Key or webhook signing secret must have mode `0600`, including when an existing broader-permission file is updated.
 
 When frontend embedded checkout is in scope, distinguish publishable keys from Secret Keys. Browser code may use a publishable key; it must never expose a Secret Key.
 
@@ -115,12 +119,14 @@ Registered product mode:
 - if the merchant is configuring a single item manually, guide the user to `Products`, click `Add`, enter product name and image, then add price details
 - required for subscription-based recurring payments according to the checkout session docs
 - use `productId` and `priceId` from Clink; do not invent them
+- in a generated public starter, accept only a server-defined `priceKey` or `planKey` and resolve it server-side to product/price IDs, amount, currency, URLs, and payment settings
 
 Non-registered product mode:
 
 - use for one-time purchases where the merchant defines product details in the checkout request
 - use `priceDataList` for name, quantity, amount, and currency
 - keep merchant-specific order and fulfillment data in the merchant system
+- preserve inline checkout capability, but have a public starter resolve its allowed key to server-owned line items rather than accepting client-defined price, currency, IDs, URLs, payment settings, or `merchantReferenceId`
 
 ### Step 5: Webhook Endpoint Setup
 
@@ -133,10 +139,16 @@ Do not initially ask the user for `CLINK_WEBHOOK_SIGNING_KEY`. After the server 
 ```bash
 clink webhook endpoint ensure \
   --url <public-webhook-url> \
-  --events core \
+  --events commerce \
   --save-secret \
   --json
 ```
+
+Use `commerce` while onboarding a complete charging or subscription integration. If the product path is already known, a one-time checkout may use `checkout,disputes`; a subscription integration must use at least `checkout,subscriptions,disputes`; add `payment-methods` when saved payment methods must be synchronized.
+
+Endpoint ensure validates selected events against runtime `GET /webhook/events` and merges existing endpoint events by default. Use `--allow-remove-events` only when replacement and removal are explicitly intended. Stable `commerce` remains a 31-event preset; future Catalog events such as `payment_method.deleted` are available through dynamic `all` or explicit selection, not by silently changing `commerce`.
+
+`core` is compatibility-only or for a minimal demo. Its exact six events are `session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, and `invoice.paid`. Warning: it omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`; migrate existing `core` endpoints to `commerce` for complete charging coverage.
 
 Then:
 
@@ -150,14 +162,18 @@ If the webhook URL changes, rerun `clink webhook endpoint ensure --save-secret -
 
 Webhook implementation must verify:
 
-- `X-Clink-Timestamp`
+- integer Unix-seconds or Unix-milliseconds `X-Clink-Timestamp` within 300 seconds of current time
 - `X-Clink-Signature`
-- HMAC SHA-256 over `X-Clink-Timestamp + "." + raw event body`
-- idempotency
+- HMAC SHA-256 over `X-Clink-Timestamp + "." + unmodified raw event body` before JSON parsing or normalization
+- the canonical envelope (`event_` ID, `object: "event"`, integer millisecond `created`, object-valued `data.object`, Invoice `items`, and no default outer `livemode`)
+- malformed payload and unknown event rejection with non-2xx responses
+- a durable Inbox keyed by `event.id` for retry deduplication even inside the accepted timestamp window
 - retry safety
 - out-of-order event tolerance
 
 Mention that Clink retries delivery up to 10 times with exponential backoff and does not guarantee event order.
+
+Default `clink webhook fixture` and `clink webhook simulate` output is local canonical fixture/replay data. The explicit `--fixture-profile legacy` shape is deprecated compatibility input. Neither local path proves real Clink sandbox Merchant Webhook UAT; require an actual Clink-to-endpoint delivery before reporting real webhook E2E completion.
 
 ### Step 6: First Checkout Session
 
@@ -172,6 +188,8 @@ For the first checkout session:
 - use `priceDataList` for non-registered one-time purchase flows
 - use `productId` and `priceId` for registered product flows
 - map the merchant order id to `merchantReferenceId` for reconciliation only
+
+Trusted local `clink checkout` commands retain full operator-controlled payload support. A generated public starter must instead accept only a server-defined `priceKey` or `planKey`; its backend calculates or loads prices, IDs, `merchantReferenceId`, return URLs, and payment settings before creating the checkout session.
 
 Do not treat `merchantReferenceId` as an idempotency key.
 

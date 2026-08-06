@@ -14,7 +14,7 @@ const runtimeScript = path.join(repoRoot, "scripts", "run_skill_runtime.mjs");
 let checks = 0;
 const failures = [];
 const WEBHOOK_VALIDATION_INPUT = [
-  "We will run clink webhook endpoint ensure --url https://example.com/api/clink/webhook --events core --save-secret --json.",
+  "We will run clink webhook endpoint ensure --url https://example.com/api/clink/webhook --events commerce --save-secret --json.",
   "We will store and sync the returned webhook signing key as CLINK_WEBHOOK_SIGNING_KEY in the platform Secret or secret manager.",
   "We will restart or redeploy the service after the secret sync.",
   "We will verify X-Clink-Timestamp and X-Clink-Signature, implement idempotency, retries, and out-of-order handling.",
@@ -23,6 +23,20 @@ const WEBHOOK_VALIDATION_INPUT = [
 function check(condition, message) {
   checks += 1;
   if (!condition) failures.push(message);
+}
+
+function getEndpointEnsureCommand(result) {
+  const artifactText = (result.artifacts || []).map((item) => item.summary || "").join("\n");
+  return artifactText.match(/clink webhook endpoint ensure --url <public-webhook-url> --events [a-z,-]+ --save-secret --json/)?.[0] || null;
+}
+
+function checkEndpointEnsureEvents(result, expectedEvents, label) {
+  const expectedCommand = `clink webhook endpoint ensure --url <public-webhook-url> --events ${expectedEvents} --save-secret --json`;
+  const actualCommand = getEndpointEnsureCommand(result);
+  check(actualCommand === expectedCommand, `${label} should emit the actual endpoint ensure command with --events ${expectedEvents}`);
+  if (expectedEvents !== "core") {
+    check(!actualCommand?.includes("--events core"), `${label} should not emit a core-only endpoint ensure command`);
+  }
 }
 
 async function main() {
@@ -35,6 +49,7 @@ async function main() {
   check(standard.questions.some((item) => item.includes("backend language")), "implementation without code context should ask for backend language");
   check(standard.artifacts.some((item) => item.name === "integration_checklist"), "standard route should emit integration_checklist artifact");
   check(standard.artifacts.some((item) => item.name === "cli_environment_checklist"), "standard route should emit cli_environment_checklist artifact");
+  checkEndpointEnsureEvents(standard, "checkout,disputes", "one-time checkout integration");
 
   const nodeStandard = await runSkillRuntime({
     prompt: "Help me implement Clink checkout session creation in this service.",
@@ -142,6 +157,7 @@ async function main() {
     "new user onboarding secret setup should include offline bundled CLI and optional preprovisioned Playwright local clink login bootstrap"
   );
   check(onboarding.notes.some((item) => item.includes("docs-confirmed")), "new user onboarding should record docs-confirmed scope note");
+  checkEndpointEnsureEvents(onboarding, "checkout,disputes", "first-checkout onboarding");
 
   const onboardingReadiness = await runSkillRuntime({
     prompt: "Validate new user onboarding readiness before launch.",
@@ -175,6 +191,7 @@ async function main() {
   });
   check(validation.route === "integration_validation", "validation prompt should route to integration_validation");
   check(validation.validation?.valid === true, "complete webhook validation input should pass");
+  checkEndpointEnsureEvents(validation, "commerce", "general webhook validation");
 
   const orderSync = await runSkillRuntime({
     prompt: "Using official docs, help me implement Clink order sync. Query GET /order, consume order webhooks, and reconcile merchantReferenceId plus sessionId.",
@@ -191,6 +208,7 @@ async function main() {
   });
   check(refundLifecycle.docsGateInvoked === true, "refund lifecycle prompt should invoke docs gate");
   check(refundLifecycle.notes.some((item) => item.includes("refund-create API")), "refund lifecycle prompt should warn when public refund-create API is unconfirmed");
+  checkEndpointEnsureEvents(refundLifecycle, "checkout,disputes", "refund lifecycle");
 
   const subscriptionBilling = await runSkillRuntime({
     prompt: "We are a SaaS subscription business. Using official docs, create products and prices, create/get/cancel subscription, and handle subscription and invoice webhooks.",
@@ -200,6 +218,66 @@ async function main() {
   check(subscriptionBilling.docsGateInvoked === true, "subscription billing prompt should invoke docs gate");
   check(subscriptionBilling.artifacts.some((item) => item.name === "product_price_sourcing"), "subscription billing prompt should emit product_price_sourcing");
   check(subscriptionBilling.artifacts.some((item) => item.name === "webhook_handler_checklist"), "subscription billing prompt should emit webhook_handler_checklist");
+  checkEndpointEnsureEvents(subscriptionBilling, "checkout,subscriptions,disputes", "subscription billing");
+
+  const lifecycleCases = [
+    ["subscription", "Implement a Clink subscription webhook integration.", "checkout,subscriptions,disputes"],
+    ["entitlement", "Handle Clink entitlement revocation when a subscription changes.", "checkout,subscriptions,disputes"],
+    ["cancellation", "Handle a Clink subscription cancellation webhook.", "checkout,subscriptions,disputes"],
+    ["past_due", "Handle Clink subscription past_due dunning webhook.", "checkout,subscriptions,disputes"],
+    ["dispute", "Handle disputes for a Clink one-time checkout.", "checkout,disputes"],
+    ["refund", "Handle refund.failed and refund.succeeded for a Clink one-time checkout.", "checkout,disputes"],
+  ];
+  for (const [label, prompt, expectedEvents] of lifecycleCases) {
+    const result = await runSkillRuntime({ prompt, docsFallbackSource: docsFallback });
+    checkEndpointEnsureEvents(result, expectedEvents, `${label} regression`);
+  }
+
+  const paymentMethodsSubscription = await runSkillRuntime({
+    prompt: "Implement a Clink subscription integration that synchronizes saved payment methods.",
+    docsFallbackSource: docsFallback,
+  });
+  checkEndpointEnsureEvents(paymentMethodsSubscription, "checkout,subscriptions,disputes,payment-methods", "subscription payment-method synchronization");
+
+  const mixedCheckoutAndSubscription = await runSkillRuntime({
+    prompt: "Support both one-time checkout and subscription billing, including saved payment methods.",
+    docsFallbackSource: docsFallback,
+  });
+  checkEndpointEnsureEvents(mixedCheckoutAndSubscription, "checkout,subscriptions,disputes,payment-methods", "mixed one-time and subscription billing");
+
+  const completeBilling = await runSkillRuntime({
+    prompt: "Design a complete billing integration covering checkout, subscriptions, renewals, cancellation, past_due dunning, disputes, refunds, and entitlement revocation.",
+    docsFallbackSource: docsFallback,
+  });
+  checkEndpointEnsureEvents(completeBilling, "commerce", "complete billing lifecycle");
+
+  const chineseCompleteBilling = await runSkillRuntime({
+    prompt: "请完成 Clink 完整订阅接入，覆盖续费、取消、past_due 催缴、退款、拒付和 entitlement 权限回收。",
+    docsFallbackSource: docsFallback,
+  });
+  checkEndpointEnsureEvents(chineseCompleteBilling, "commerce", "Chinese complete subscription lifecycle");
+
+  const compatibilityDemo = await runSkillRuntime({
+    prompt: "Create a compatibility-only minimal demo using the core webhook preset.",
+    docsFallbackSource: docsFallback,
+  });
+  checkEndpointEnsureEvents(compatibilityDemo, "core", "compatibility-only minimal demo");
+  const compatibilityArtifact = compatibilityDemo.artifacts.find((item) => item.name === "webhook_endpoint_automation");
+  for (const eventName of ["session.complete", "order.succeeded", "order.failed", "refund.succeeded", "subscription.created", "invoice.paid"]) {
+    check(compatibilityArtifact?.summary?.includes(eventName), `core compatibility artifact should list ${eventName}`);
+  }
+  for (const riskName of ["subscription.cancelled", "subscription.past_due", "subscription.updated.*", "invoice.open/void", "dispute.*", "refund.failed", "session.expired"]) {
+    check(compatibilityArtifact?.summary?.includes(riskName), `core compatibility artifact should warn about omitted ${riskName}`);
+  }
+  check(compatibilityArtifact?.summary?.includes("exactly 6 events"), "core compatibility artifact should state the exact six-event count");
+  check(compatibilityArtifact?.summary?.includes("--events commerce"), "core compatibility artifact should recommend migration to commerce");
+
+  const productionCompatibility = await runSkillRuntime({
+    prompt: "Build a complete production subscription integration with renewal, cancellation, past_due, disputes, refunds, and entitlement revocation while preserving backward compatibility with legacy core.",
+    docsFallbackSource: docsFallback,
+    skipValidation: true,
+  });
+  checkEndpointEnsureEvents(productionCompatibility, "commerce", "production subscription with backward compatibility");
 
   const genericAgent = await runSkillRuntime({
     prompt: "Design a generic non-OpenClaw agent integration using agentic-payment-skills, clink-payment-skill, and clink-cli.",
@@ -218,6 +296,7 @@ async function main() {
     dashboardFallbackReview.notes.some((item) => item.includes("clink webhook endpoint ensure") && item.includes("fallback")),
     "Dashboard webhook fallback prompt should keep CLI primary and Dashboard fallback wording"
   );
+  checkEndpointEnsureEvents(dashboardFallbackReview, "commerce", "webhook review");
 
   const ambiguous = await runSkillRuntime({
     prompt: "Help me design checkout, webhook, and payment handoff support for the same merchant flow.",

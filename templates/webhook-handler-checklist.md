@@ -1,20 +1,28 @@
 # Webhook Handler Checklist
 
 - Expose a public HTTPS webhook endpoint, using a tunnel only for pure localhost development
-- Configure the endpoint with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
-- For local env-file apps, prefer `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --sync-env-file <env-file> --json`
+- Configure a complete charging or subscription endpoint with `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --json`
+- For local env-file apps, prefer `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --sync-env-file <env-file> --json`
+- On POSIX, require Secret-bearing CLI profiles and `.env` files to have mode `0600`
+- Narrow scope only when the product flow is known: `checkout,disputes` for one-time checkout; at least `checkout,subscriptions,disputes` for subscriptions; add `payment-methods` when saved payment methods must be synchronized
+- Confirm ensure validates against runtime `GET /webhook/events` and merges existing endpoint events by default; use `--allow-remove-events` only for an explicitly authorized replacement
+- Treat stable `commerce` as 31 events; do not let a future Catalog event such as `payment_method.deleted` silently enter it (use dynamic `all` or an explicit event instead)
+- Treat `core` as compatibility-only/minimal-demo: its exact six events are `session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, and `invoice.paid`; warn that it omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`, and migrate complete charging integrations to `commerce`
 - Sync the returned or rotated signing key into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
 - Restart or redeploy the service after syncing the signing key
-- Verify `X-Clink-Timestamp`
+- Accept `X-Clink-Timestamp` only as integer Unix seconds or milliseconds within 300 seconds of current time
 - Verify `X-Clink-Signature`
-- Preserve the raw event body before JSON parsing
+- Preserve the unmodified raw event body and verify its signature before JSON parsing or normalization
 - Verify HMAC SHA-256 over `X-Clink-Timestamp + "." + raw event body` with the webhook signing key
-- Reject stale or replayed deliveries
-- Make processing idempotent
+- Reject timestamps outside the 300-second past-or-future window; do not treat this window as delivery deduplication
+- Validate the canonical envelope: `event_` ID, `object: "event"`, integer Unix-millisecond `created`, and object-valued `data.object`; Invoice resources use `items`, and the default envelope has no outer `livemode`
+- Reject malformed payloads and unknown event types with a non-2xx response
+- Deduplicate repeated deliveries through a durable Inbox keyed by `event.id`, including inside the accepted timestamp window
 - Handle retries safely
 - Tolerate out-of-order event delivery
 - Match local orders with both `merchantReferenceId` and `sessionId` when both are available
 - Quarantine or reject events where `merchantReferenceId` and `sessionId` point to different local orders
 - Reconcile merchant order and refund state after webhook processing
 - Treat webhook HTTP 200 as transport success only; separately verify local order paid/completed and entitlement/fulfillment completion after real sandbox payment
+- Treat default `clink webhook fixture`/`simulate` output, mocks, and signed replays as local inputs rather than Clink server events; explicit `--fixture-profile legacy` is deprecated compatibility testing, and none proves real Clink sandbox Merchant Webhook UAT
 - Rerun `clink webhook endpoint ensure --save-secret --json` and resync the signing key whenever the endpoint URL changes

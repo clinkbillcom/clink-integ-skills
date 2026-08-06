@@ -38,6 +38,10 @@ node "$CLINK_INTEG_CLI" auth status --json
 
 After either path, product catalog import, checkout/subscription calls, webhook endpoint management, doctor, smoke-test, and local webhook commands should run with Secret Key authentication and should not require Playwright or network package installation.
 
+Authenticated `clink api request` input is restricted to a relative path below the configured API base. It cannot override the selected base origin or escape its base pathname with an absolute URL, scheme-relative URL, backslash, or parent path. On POSIX systems, CLI profiles and `.env` files containing Secret Keys or webhook signing secrets must be stored with mode `0600`.
+
+The trusted local `clink checkout` commands retain their full operator-facing payload capability. Generated public checkout starters have a narrower trust boundary: callers select only a server-defined `priceKey` or `planKey`, while the server owns the amount, currency, product/price IDs, `merchantReferenceId`, return URLs, and payment settings. Replace the starter's example allowlist with a server-side catalog or order store before production; do not treat `merchantReferenceId` as an idempotency key.
+
 Regenerate and verify the offline bundle only when updating the vendored CLI:
 
 ```bash
@@ -50,13 +54,21 @@ Webhook endpoint management should be done through the Secret Key API path:
 ```bash
 clink webhook endpoint ensure \
   --url https://example.com/api/clink/webhook \
-  --events core \
+  --events commerce \
   --save-secret \
   --sync-env-file .env.local \
   --json
 ```
 
+Use `commerce` for a complete charging or subscription integration. A one-time checkout can use `checkout,disputes`; a subscription integration must use at least `checkout,subscriptions,disputes`; add `payment-methods` when saved payment methods must be synchronized, or keep `commerce`.
+
+`core` is compatibility-only and suitable only for a minimal demo. Its exact six events are `session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, and `invoice.paid`. It omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`; existing `core` endpoints should migrate to `commerce` for complete charging coverage.
+
+Endpoint ensure validates selected events against runtime `GET /webhook/events` and merges with an existing endpoint's events by default. Use `--allow-remove-events` only when replacing the event set and deleting existing events is explicitly intended. The versioned `commerce` preset remains a stable 31-event set; future Catalog events such as `payment_method.deleted` are available only through dynamic `all` or an explicit event selection until a later preset version changes that contract.
+
 After `--save-secret`, the agent must sync the returned or rotated signing secret into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`, then restart or redeploy the app. A webhook URL change requires running `ensure` again and repeating the sync.
+
+The default local Merchant Webhook fixture uses an `event_` ID, `object: "event"`, integer Unix-millisecond `created`, an object-valued `data.object`, Invoice `items`, and no outer `livemode`. The flattened `--fixture-profile legacy` shape is deprecated and must be selected explicitly. `clink webhook fixture` and `clink webhook simulate` are local validation tools, not Clink server events and not proof of a real Clink sandbox Merchant Webhook UAT. Handlers must accept only integer second or millisecond `X-Clink-Timestamp` values within 300 seconds, verify the unmodified raw body before JSON parsing, reject malformed or unknown events with non-2xx responses, and use a durable Inbox keyed by `event.id` even inside that time window.
 
 ## What The Skill Covers
 

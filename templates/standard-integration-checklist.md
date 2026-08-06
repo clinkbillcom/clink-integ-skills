@@ -7,17 +7,26 @@
 - Create or confirm local merchant order before checkout session creation
 - Map merchant `order_id` to `merchantReferenceId`
 - Implement merchant-side idempotency outside Clink
+- Preserve trusted local `clink checkout` full-payload operation, but make generated public starters accept only a server-defined `priceKey` or `planKey`
+- Keep starter amount, currency, product/price IDs, `merchantReferenceId`, return URLs, and payment settings server-authoritative
 - Decide checkout vs customer portal for subscription-aware paths
 - Configure `CLINK_SECRET_KEY` through either the offline bundled CLI with offline-preprovisioned optional Playwright + local `clink login` + `clink dashboard apikey ensure-secret --save --json`, or a browserless manual Secret Key copied from `Merchant Dashboard > Developers > API Keys`
+- On POSIX, keep Secret-bearing CLI profiles and `.env` files at mode `0600`
 - Verify `clink auth secret set --help`, `clink catalog import --help`, and `clink webhook endpoint ensure --help`
-- Configure webhook endpoint with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
-- For local env-file apps, prefer `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --sync-env-file <env-file> --json`
+- Pass only a relative path below the configured base to authenticated `clink api request`; reject origin overrides and base-path escapes
+- Configure a complete charging or subscription webhook endpoint with `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --json`
+- For local env-file apps, prefer `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --sync-env-file <env-file> --json`
+- Use `checkout,disputes` for a one-time checkout, at least `checkout,subscriptions,disputes` for subscriptions, and add `payment-methods` when saved payment methods must be synchronized
+- Confirm endpoint ensure validates events against runtime `GET /webhook/events`, merges existing events by default, and uses `--allow-remove-events` only for an explicitly authorized replacement
+- Treat `core` as compatibility-only/minimal-demo: it contains exactly `session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, and `invoice.paid`; warn that it omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`, then migrate complete charging integrations to stable 31-event `commerce`
 - Sync the returned or rotated signing secret to the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
 - Restart or redeploy after syncing the webhook signing secret
-- Verify `X-Clink-Timestamp` and `X-Clink-Signature`
-- Handle idempotency, retry safety, and out-of-order delivery
+- Accept only integer second/millisecond `X-Clink-Timestamp` values within 300 seconds and verify `X-Clink-Signature` against the unmodified raw body before JSON parsing or normalization
+- Validate canonical Merchant Webhook envelopes (`event_`, `object: "event"`, integer millisecond `created`, object-valued `data.object`, Invoice `items`, no default outer `livemode`)
+- Reject malformed payloads and unknown event types with non-2xx responses; deduplicate retries with a durable Inbox keyed by `event.id`, including inside the timestamp window, and tolerate out-of-order delivery
 - Match webhook events to local orders with both `merchantReferenceId` and `sessionId` when both are available
 - Rerun endpoint ensure and resync the signing secret whenever the webhook URL changes
 - Separate payment confirmation from downstream merchant fulfillment
 - Verify real sandbox payment by confirming local order paid/completed and entitlement/fulfillment completion, not just webhook HTTP 200
+- Treat fixtures, mocks, and local replays as local inputs rather than Clink server events; keep them separate from real Clink sandbox Merchant Webhook UAT and use deprecated `--fixture-profile legacy` only for explicit compatibility tests
 - Model refund as a lifecycle, not as a guaranteed public create API

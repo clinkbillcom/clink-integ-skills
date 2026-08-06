@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import process from "process";
+import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -141,7 +142,12 @@ const moduleExpectations = [
       "clink catalog plan",
       "clink catalog import",
       "clink webhook endpoint ensure",
-      "--events core",
+      "--events commerce",
+      "checkout,disputes",
+      "checkout,subscriptions,disputes",
+      "payment-methods",
+      "31-event",
+      "payment_method.deleted",
       "--save-secret",
       "CLINK_SECRET_KEY",
       "CLINK_WEBHOOK_SIGNING_KEY",
@@ -480,6 +486,14 @@ function read(file) {
   return fs.readFileSync(path.join(repoRoot, file), "utf8");
 }
 
+function runBundledCli(args) {
+  return execFileSync(
+    process.execPath,
+    [path.join(repoRoot, "vendor/clink-integ-cli/clink-integ-cli"), ...args],
+    { cwd: repoRoot, encoding: "utf8", timeout: 20_000 }
+  );
+}
+
 let checks = 0;
 const failures = [];
 
@@ -538,6 +552,224 @@ for (const expectation of moduleExpectations) {
   for (const token of expectation.notContains || []) {
     check(!contents.includes(token), `${expectation.file} contains prohibited token: ${token}`);
   }
+}
+
+const scenarioPresetGuides = [
+  "SKILL.md",
+  "README.md",
+  "README-zh.md",
+  "references/clink-integ-cli-integration.md",
+  "references/agent-prompt.zh-CN.md",
+  "references/environment-strategy.md",
+  "references/new-user-onboarding.md",
+  "references/standard-integration.md",
+  "templates/standard-integration-checklist.md",
+  "templates/webhook-handler-checklist.md"
+];
+
+for (const file of scenarioPresetGuides) {
+  if (!exists(file)) continue;
+  const contents = read(file);
+  check(
+    contents.includes("--events commerce"),
+    `${file} must recommend --events commerce for a complete charging integration`
+  );
+  check(
+    contents.includes("checkout,disputes"),
+    `${file} must document checkout,disputes for one-time checkout/refund/dispute scope`
+  );
+  check(
+    contents.includes("checkout,subscriptions,disputes"),
+    `${file} must document checkout,subscriptions,disputes for subscription scope`
+  );
+  check(
+    contents.includes("payment-methods"),
+    `${file} must document adding payment-methods when saved payment methods are synchronized`
+  );
+}
+
+const coreEvents = [
+  "session.complete",
+  "order.succeeded",
+  "order.failed",
+  "refund.succeeded",
+  "subscription.created",
+  "invoice.paid"
+];
+
+const coreOmissions = [
+  "subscription.cancelled",
+  "subscription.past_due",
+  "subscription.updated.*",
+  "invoice.open/void",
+  "dispute.*",
+  "refund.failed",
+  "session.expired"
+];
+
+const corePolicyGuides = [
+  "SKILL.md",
+  "README.md",
+  "README-zh.md",
+  "references/clink-integ-cli-integration.md",
+  "references/agent-prompt.zh-CN.md",
+  "references/environment-strategy.md",
+  "references/new-user-onboarding.md",
+  "references/review-checklist.md",
+  "references/standard-integration.md",
+  "references/validation-workflow.md",
+  "templates/standard-integration-checklist.md",
+  "templates/webhook-handler-checklist.md"
+];
+
+function checkCoreCompatibilityDisclosure(file, contents) {
+  check(
+    /compatib|向后兼容|兼容|minimal[ -]demo|最小演示/i.test(contents),
+    `${file} must limit core to compatibility or a minimal demo`
+  );
+  for (const event of coreEvents) {
+    check(contents.includes(event), `${file} core disclosure is missing exact event: ${event}`);
+  }
+  for (const event of coreOmissions) {
+    check(contents.includes(event), `${file} core disclosure is missing omitted event: ${event}`);
+  }
+  check(
+    /migrat|迁移/i.test(contents) && contents.includes("commerce"),
+    `${file} core disclosure must recommend migration to commerce`
+  );
+}
+
+for (const file of corePolicyGuides) {
+  if (!exists(file)) continue;
+  checkCoreCompatibilityDisclosure(file, read(file));
+}
+
+for (const directory of ["references", "templates"]) {
+  const fullDirectory = path.join(repoRoot, directory);
+  if (!fs.existsSync(fullDirectory)) continue;
+  for (const fullPath of collectTextFiles(fullDirectory)) {
+    const contents = fs.readFileSync(fullPath, "utf8");
+    if (!contents.includes("--events core")) continue;
+    const file = path.relative(repoRoot, fullPath).replace(/\\/g, "/");
+    checkCoreCompatibilityDisclosure(file, contents);
+  }
+}
+
+const fixtureUatBoundaryGuides = [
+  "SKILL.md",
+  "README.md",
+  "README-zh.md",
+  "references/clink-integ-cli-integration.md",
+  "references/new-user-onboarding.md",
+  "references/standard-integration.md",
+  "references/validation-workflow.md",
+  "templates/standard-integration-checklist.md",
+  "templates/webhook-handler-checklist.md"
+];
+
+for (const file of fixtureUatBoundaryGuides) {
+  if (!exists(file)) continue;
+  const contents = read(file);
+  check(/fixture/i.test(contents), `${file} must identify fixture-based validation`);
+  check(/sandbox/i.test(contents), `${file} must distinguish real sandbox validation`);
+  check(/UAT|E2E/i.test(contents), `${file} must name real sandbox UAT or E2E validation`);
+  check(
+    /\bnot\b|cannot|never|separate|不能|不得|不是|不可/i.test(contents),
+    `${file} must state that fixture/local replay is not real sandbox UAT evidence`
+  );
+}
+
+if (exists("tests/cases.json")) {
+  const cases = JSON.parse(read("tests/cases.json")).cases;
+  const webhookSetupCase = cases.find((testCase) => testCase.id === "webhook-setup");
+  check(Boolean(webhookSetupCase), "tests/cases.json must include the webhook-setup case");
+  if (webhookSetupCase) {
+    check(
+      JSON.stringify(webhookSetupCase.must_include).includes("--events commerce"),
+      "webhook-setup standard answer must require --events commerce"
+    );
+    check(
+      webhookSetupCase.must_not_include?.includes("--events core"),
+      "webhook-setup standard answer must reject --events core"
+    );
+  }
+}
+
+try {
+  const invoiceFixture = JSON.parse(
+    runBundledCli(["--json", "webhook", "fixture", "invoice.paid"])
+  );
+  check(
+    typeof invoiceFixture.id === "string" && invoiceFixture.id.startsWith("event_"),
+    "bundled invoice.paid fixture id must use the event_ prefix"
+  );
+  check(invoiceFixture.object === "event", "bundled invoice.paid fixture object must equal event");
+  check(
+    typeof invoiceFixture.created === "number" && Number.isInteger(invoiceFixture.created),
+    "bundled invoice.paid fixture created must be an integer Unix-millisecond timestamp"
+  );
+  check(
+    invoiceFixture.data &&
+      typeof invoiceFixture.data === "object" &&
+      !Array.isArray(invoiceFixture.data) &&
+      invoiceFixture.data.object &&
+      typeof invoiceFixture.data.object === "object" &&
+      !Array.isArray(invoiceFixture.data.object),
+    "bundled invoice.paid fixture data.object must be an object"
+  );
+  check(
+    Object.keys(invoiceFixture.data || {}).length === 1 &&
+      Object.hasOwn(invoiceFixture.data || {}, "object"),
+    "bundled invoice.paid fixture data must contain only object"
+  );
+  check(
+    Array.isArray(invoiceFixture.data?.object?.items),
+    "bundled invoice.paid fixture resource must use items"
+  );
+  check(
+    !Object.hasOwn(invoiceFixture.data?.object || {}, "lineItems"),
+    "bundled invoice.paid fixture resource must not use lineItems"
+  );
+  check(
+    !Object.hasOwn(invoiceFixture, "livemode"),
+    "bundled invoice.paid fixture envelope must not contain livemode"
+  );
+} catch (error) {
+  check(false, `unable to execute and parse bundled invoice.paid fixture: ${error.message}`);
+}
+
+try {
+  const endpointEnsureHelp = runBundledCli(["webhook", "endpoint", "ensure", "--help"]);
+  const commerceMatch = endpointEnsureHelp.match(/^\s*commerce \(31\):\s*(.+)$/m);
+  check(Boolean(commerceMatch), "bundled endpoint ensure help must expose stable commerce (31)");
+  if (commerceMatch) {
+    const commerceEvents = commerceMatch[1].split(",").map((event) => event.trim()).filter(Boolean);
+    check(commerceEvents.length === 31, "bundled commerce preset must list exactly 31 events");
+    check(new Set(commerceEvents).size === 31, "bundled commerce preset must not contain duplicates");
+    check(
+      !commerceEvents.includes("payment_method.deleted"),
+      "payment_method.deleted must not silently enter stable commerce"
+    );
+  }
+  const paymentMethodsMatch = endpointEnsureHelp.match(/^\s*payment-methods \(3\):\s*(.+)$/m);
+  check(Boolean(paymentMethodsMatch), "bundled endpoint ensure help must expose payment-methods (3)");
+  if (paymentMethodsMatch) {
+    const paymentMethodEvents = paymentMethodsMatch[1]
+      .split(",")
+      .map((event) => event.trim())
+      .filter(Boolean);
+    check(paymentMethodEvents.length === 3, "bundled payment-methods preset must list exactly 3 events");
+    check(
+      !paymentMethodEvents.includes("payment_method.deleted"),
+      "payment_method.deleted must not silently enter stable payment-methods"
+    );
+  }
+  check(
+    /all \(dynamic\): every event returned by the runtime catalog/i.test(endpointEnsureHelp),
+    "bundled endpoint ensure help must keep all dynamic for future runtime Catalog events"
+  );
+} catch (error) {
+  check(false, `unable to inspect bundled endpoint ensure help: ${error.message}`);
 }
 
 if (exists("references/elements-integration.md")) {

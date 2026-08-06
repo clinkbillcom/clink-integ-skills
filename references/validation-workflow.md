@@ -20,14 +20,17 @@ Prefer:
 
 For standard integration webhook validation:
 
-1. confirm endpoint registration is automated with `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
-2. confirm the selected event-name scope, such as `--events core` or the smallest explicit event list required by the product flow
-3. confirm the returned or rotated signing secret is synced into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
-4. confirm the service is restarted or redeployed after signing-secret sync
-5. confirm header verification for `X-Clink-Timestamp` and `X-Clink-Signature`
-6. confirm idempotency, retry safety, and out-of-order tolerance
-7. confirm order reconciliation matches both `merchantReferenceId` and `sessionId` when both are available, and quarantines mismatches
-8. emit remediation items for missing controls
+1. confirm complete charging endpoint registration uses `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --json`
+2. inspect the actual endpoint command and confirm its scenario-safe scope: `commerce` for complete charging, `checkout,disputes` for one-time checkout, at least `checkout,subscriptions,disputes` for subscriptions, with `payment-methods` added when needed
+3. confirm ensure validates against runtime `GET /webhook/events`, merges existing events by default, and uses `--allow-remove-events` only for an explicitly authorized replacement; stable `commerce` remains 31 events and does not absorb a future `payment_method.deleted`
+4. allow `core` only for compatibility/minimal-demo output that lists its exact events (`session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, `invoice.paid`), warns it omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`, and recommends migration to `commerce`
+5. confirm the returned or rotated signing secret is synced into the merchant runtime as `CLINK_WEBHOOK_SIGNING_KEY`
+6. confirm the service is restarted or redeployed after signing-secret sync
+7. confirm `X-Clink-Timestamp`/`X-Clink-Signature` verification uses the unmodified raw body before parsing
+8. confirm canonical `event_`/`object="event"`/integer `created`/object-valued `data.object`/Invoice `items`, non-2xx rejection for malformed or unknown events, and deduplication by `event.id`
+9. confirm fixture/simulate/local replay is not reported as real Clink sandbox Merchant Webhook UAT
+10. confirm retry safety, out-of-order tolerance, and dual-field order reconciliation
+11. emit remediation items for missing controls
 
 Prefer:
 

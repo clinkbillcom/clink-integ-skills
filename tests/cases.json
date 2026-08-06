@@ -75,18 +75,22 @@
       "prompt": "Help me implement Clink webhook support in my merchant backend.",
       "must_include": [
         ["clink webhook endpoint ensure", "webhook endpoint ensure"],
-        ["--events core", "subscribe to required events", "select the event types", "subscribe to"],
+        "--events commerce",
         ["--save-secret", "save-secret"],
         ["sync the returned", "sync the signing", "CLINK_WEBHOOK_SIGNING_KEY", "webhook signing key"],
         ["restart", "redeploy"],
         "X-Clink-Timestamp",
         "X-Clink-Signature",
+        "raw body",
+        "data.object",
+        "items",
         "idempotency",
         ["retry", "retries", "attempts delivery up to 10 times"],
         "out-of-order"
       ],
       "must_not_include": [
-        "only frontend redirect handling"
+        "only frontend redirect handling",
+        "--events core"
       ]
     },
     {
@@ -156,6 +160,7 @@
         ["retry", "retries", "retry logic", "delivery up to 10 times"],
         ["out-of-order", "out of order", "not guaranteed to arrive in order", "arriving in a specific order"],
         ["clink webhook endpoint ensure", "webhook endpoint ensure", "endpoint registration", "register your https endpoint"],
+        ["--events commerce", "checkout,subscriptions,disputes", "safe event preset"],
         ["CLINK_WEBHOOK_SIGNING_KEY", "signing key sync", "sync the signing secret", "webhook signing key"]
       ],
       "must_not_include": [

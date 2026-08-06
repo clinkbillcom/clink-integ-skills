@@ -1,13 +1,13 @@
 {
   "name": "clink-integ-cli",
-  "version": "0.1.14",
+  "version": "0.2.1",
   "source": "official-release-bundle",
-  "sourceCommit": "7311b89849037f9ee4f18cc334eb4ddf204e9ac6",
+  "sourceCommit": "19149893b38f263dc36138289f996118f8e739b3",
   "bundle": "clink-integ-cli",
   "format": "esm",
   "node": ">=20",
-  "sha256": "995ddbebbeae69774176ee89878f12a8dab27868e540fc5c0a8615186d6265d4",
-  "bytes": 355390,
+  "sha256": "c851b4cfd35a146ed34d12b30135695a2fdcc580831031e271e9550c0ce377eb",
+  "bytes": 420829,
   "notes": [
     "Runtime bundle is self-contained for non-browser CLI commands.",
     "The optional clink login browser path still requires a pre-provisioned Playwright package and browser outside this bundle."

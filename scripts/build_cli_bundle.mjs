@@ -34,6 +34,9 @@ await esbuild.build({
   format: "esm",
   target: "node20",
   packages: "bundle",
+  // `clink login` is the only browser-backed command. Keep Playwright optional
+  // so the offline bundle stays self-contained for every non-browser command.
+  external: ["playwright"],
   absWorkingDir: cliRoot,
   nodePaths: [path.join(cliRoot, "node_modules")],
   banner: {
@@ -189,6 +192,10 @@ async function readGitCommit(cwd) {
 async function rewriteOfflineLoginGuidance(file) {
   let generated = await fs.readFile(file, "utf8");
   generated = generated
+    .replace(
+      /^\/\/ .*\/clink-integ-cli-bundle-[^/\r\n]+\/entry\.ts$/m,
+      "// clink-integ-cli-bundle/entry.ts"
+    )
     .replace(
       "For project-local CLI installs, add it to the same tools prefix:",
       "For offline skill usage, Playwright must be pre-provisioned outside this bundle:"

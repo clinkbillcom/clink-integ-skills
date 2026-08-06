@@ -211,14 +211,19 @@ Applies to: standard integrations.
 
 Checks:
 
-- endpoint registration is defined through `clink webhook endpoint ensure --url <public-webhook-url> --events core --save-secret --json`
-- event-name subscription scope is documented, such as `--events core` or the smallest explicit event list required by the product flow
+- endpoint registration is defined through `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --json` for a complete charging or subscription integration
+- the actual endpoint command uses a safe scope for its scenario: `commerce` for complete charging, `checkout,disputes` for one-time checkout, at least `checkout,subscriptions,disputes` for subscriptions, with `payment-methods` added when saved payment methods must be synchronized
+- endpoint ensure validates against runtime `GET /webhook/events` and preserves existing endpoint events through its default merge behavior; `--allow-remove-events` appears only when replacement and removal are explicitly authorized
+- stable `commerce` remains 31 events; a future runtime `payment_method.deleted` is selected only through dynamic `all` or explicit selection until a later versioned preset decision
+- a compatibility-only/minimal-demo `core` command is accepted only beside its exact events (`session.complete`, `order.succeeded`, `order.failed`, `refund.succeeded`, `subscription.created`, `invoice.paid`) and a warning that it omits `subscription.cancelled`, `subscription.past_due`, `subscription.updated.*`, `invoice.open/void`, `dispute.*`, `refund.failed`, and `session.expired`, with migration to `commerce` recommended
 - signing-secret sync is specified: sync the returned or rotated secret into `CLINK_WEBHOOK_SIGNING_KEY`
 - service restart or redeploy after signing-secret sync is specified
 - timestamp and signature verification logic is present
 - idempotency handling is defined (deduplication by event ID)
 - retry tolerance is addressed
 - out-of-order event tolerance is addressed
+- canonical Merchant Webhook handling verifies the unmodified raw body before parsing, expects `event_`, `object: "event"`, integer millisecond `created`, object-valued `data.object`, and Invoice `items`, and rejects malformed or unknown events with non-2xx responses while deduplicating by `event.id`
+- fixture/simulate/local replay results are not reported as real Clink sandbox Merchant Webhook UAT
 
 Tool: `node scripts/lint_webhook_design.mjs`
 

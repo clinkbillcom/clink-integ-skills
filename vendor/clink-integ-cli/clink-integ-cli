@@ -3480,6 +3480,118 @@ var {
   Help
 } = import_index.default;
 
+// src/api/url.ts
+var CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+var ENCODED_PATH_SEPARATOR = /%(?:2f|5c)/i;
+var URL_SCHEME = /^[a-z][a-z\d+.-]*:/i;
+var VALIDATED_API_URL = /* @__PURE__ */ Symbol("validated Clink API URL");
+var VALIDATED_API_BASE = /* @__PURE__ */ Symbol("validated Clink API base");
+function resolveClinkApiUrl(baseUrl, path, query) {
+  const base = parseApiBaseUrl(baseUrl);
+  const relativePath = validateApiPath(path);
+  const resolved = new URL(relativePath, base);
+  if (resolved.origin !== base.origin || !isWithinBasePath(resolved.pathname, base.pathname)) {
+    throw invalidApiPath();
+  }
+  if (resolved.username || resolved.password || resolved.hash || resolved.search) {
+    throw invalidApiPath();
+  }
+  for (const [key, value] of Object.entries(query ?? {})) {
+    if (value !== void 0) {
+      resolved.searchParams.set(key, String(value));
+    }
+  }
+  return Object.freeze({
+    href: resolved.toString(),
+    pathname: resolved.pathname,
+    [VALIDATED_API_URL]: true,
+    [VALIDATED_API_BASE]: apiBaseIdentity(base),
+    toString: () => resolved.toString()
+  });
+}
+function isValidatedClinkApiUrl(value) {
+  return Boolean(
+    value && typeof value === "object" && VALIDATED_API_URL in value && value[VALIDATED_API_URL] === true
+  );
+}
+function assertValidatedClinkApiUrlMatchesBase(value, baseUrl) {
+  const expectedBase = parseApiBaseUrl(baseUrl);
+  let resolved;
+  try {
+    resolved = new URL(value.href);
+  } catch {
+    throw new Error("Validated Clink API URL does not match the configured API base URL.");
+  }
+  if (value[VALIDATED_API_BASE] !== apiBaseIdentity(expectedBase) || resolved.origin !== expectedBase.origin || !isWithinBasePath(resolved.pathname, expectedBase.pathname) || resolved.username || resolved.password || resolved.hash || resolved.pathname !== value.pathname) {
+    throw new Error("Validated Clink API URL does not match the configured API base URL.");
+  }
+}
+function parseApiBaseUrl(baseUrl) {
+  if (!baseUrl || CONTROL_CHARACTER.test(baseUrl) || baseUrl.includes("\\")) {
+    throw new Error("Invalid Clink API base URL configuration.");
+  }
+  let base;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    throw new Error("Invalid Clink API base URL configuration.");
+  }
+  if (base.protocol !== "https:" && base.protocol !== "http:" || !base.hostname || base.username || base.password || base.search || base.hash) {
+    throw new Error("Invalid Clink API base URL configuration.");
+  }
+  base.pathname = base.pathname.endsWith("/") ? base.pathname : `${base.pathname}/`;
+  return base;
+}
+function validateApiPath(path) {
+  if (!path || path !== path.trim()) {
+    throw invalidApiPath();
+  }
+  let decoded = path;
+  for (let remaining = path.length + 1; remaining > 0; remaining -= 1) {
+    validateDecodedLayer(decoded);
+    let next;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      throw invalidApiPath();
+    }
+    if (next === decoded) break;
+    decoded = next;
+    if (remaining === 1) {
+      throw invalidApiPath();
+    }
+  }
+  const relative = path.startsWith("/") ? path.slice(1) : path;
+  if (!relative || relative.startsWith("/")) {
+    throw invalidApiPath();
+  }
+  return relative;
+}
+function validateDecodedLayer(value) {
+  if (CONTROL_CHARACTER.test(value) || value.includes("\\") || value.includes("?") || value.includes("#") || ENCODED_PATH_SEPARATOR.test(value)) {
+    throw invalidApiPath();
+  }
+  const withoutOneLeadingSlash = value.startsWith("/") ? value.slice(1) : value;
+  if (withoutOneLeadingSlash.startsWith("/") || URL_SCHEME.test(withoutOneLeadingSlash)) {
+    throw invalidApiPath();
+  }
+  for (const segment of withoutOneLeadingSlash.split("/")) {
+    if (segment === "." || segment === "..") {
+      throw invalidApiPath();
+    }
+  }
+}
+function isWithinBasePath(pathname, basePathname) {
+  const baseRoot = basePathname === "/" ? "/" : basePathname.slice(0, -1);
+  return pathname === baseRoot || pathname.startsWith(basePathname);
+}
+function apiBaseIdentity(base) {
+  return `${base.origin}${base.pathname}`;
+}
+function invalidApiPath() {
+  return new Error("Invalid Clink API path. Use a relative API path and pass query parameters with --query.");
+}
+
 // src/curl.ts
 function curlForJsonRequest(method, url, body) {
   const lines2 = [
@@ -3562,15 +3674,19 @@ var ClinkApiClient = class {
     return this.request("PUT", path, options);
   }
   async request(method, path, options = {}) {
-    if (!this.config.apiKey && !this.config.dryRun) {
+    if (options.executeInDryRun && method !== "GET") {
+      throw new Error("executeInDryRun is restricted to read-only GET requests.");
+    }
+    if (!this.config.apiKey && (!this.config.dryRun || options.executeInDryRun)) {
       throw new Error("Missing Clink Secret Key. Set CLINK_SECRET_KEY or run clink auth secret set --api-key env:CLINK_SECRET_KEY");
     }
-    const url = new URL(path.replace(/^\//, ""), this.config.baseUrl);
-    for (const [key, value] of Object.entries(options.query ?? {})) {
-      if (value !== void 0) {
-        url.searchParams.set(key, String(value));
-      }
+    if (isValidatedClinkApiUrl(path) && options.query !== void 0) {
+      throw new Error("Query parameters are already included in the validated Clink API URL.");
     }
+    if (isValidatedClinkApiUrl(path)) {
+      assertValidatedClinkApiUrlMatchesBase(path, this.config.baseUrl);
+    }
+    const url = isValidatedClinkApiUrl(path) ? path : resolveClinkApiUrl(this.config.baseUrl, path, options.query);
     const headers = new Headers({
       "X-API-KEY": this.config.apiKey ?? "dry_run_missing_key",
       "X-Timestamp": String(Date.now())
@@ -3582,12 +3698,12 @@ var ClinkApiClient = class {
       headers.set("Content-Type", "application/json");
       body = JSON.stringify(options.body);
     }
-    if (this.config.dryRun) {
+    if (this.config.dryRun && !options.executeInDryRun) {
       return {
         dryRun: true,
         request: {
           method,
-          url: url.toString(),
+          url: url.href,
           headers: {
             "X-API-KEY": "[masked]",
             "X-Timestamp": "[generated]",
@@ -3599,7 +3715,12 @@ var ClinkApiClient = class {
     }
     let response;
     try {
-      response = await fetch(url, { method, headers, body });
+      response = await fetch(url.href, {
+        method,
+        headers,
+        body,
+        signal: AbortSignal.timeout(this.config.apiTimeoutMs)
+      });
     } catch (error) {
       throw new Error(`Clink API ${method} ${url.pathname} network error: ${formatFetchError(error)}`);
     }
@@ -3657,9 +3778,66 @@ function sanitizeApiText(value, config) {
 }
 
 // src/config.ts
-import { mkdir, readFile as readFile2, writeFile } from "node:fs/promises";
+import { readFile as readFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join as join2 } from "node:path";
+
+// src/atomic-write.ts
+import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { access, chmod, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename as basename2, dirname, join } from "node:path";
+var PRIVATE_FILE_MODE = 384;
+async function writePrivateTextFileAtomically(filePath, content) {
+  const directory = dirname(filePath);
+  await mkdir(directory, { recursive: true });
+  const temporaryPath = temporaryFilePath(filePath, "tmp");
+  try {
+    await writeFile(temporaryPath, content, { encoding: "utf8", flag: "wx", mode: PRIVATE_FILE_MODE });
+    await setPrivateFileMode(temporaryPath);
+    await rename(temporaryPath, filePath);
+    await verifyPrivateFileMode(filePath);
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => void 0);
+  }
+}
+async function assertAtomicTextFileTarget(filePath) {
+  try {
+    const target = await stat(filePath);
+    if (!target.isFile()) {
+      throw new Error(`Local secret destination must be a file path: ${filePath}`);
+    }
+    await access(filePath, constants.W_OK);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const directory = dirname(filePath);
+  await mkdir(directory, { recursive: true });
+  const probePath = temporaryFilePath(filePath, "probe");
+  try {
+    await writeFile(probePath, "", { encoding: "utf8", flag: "wx", mode: PRIVATE_FILE_MODE });
+  } finally {
+    await rm(probePath, { force: true }).catch(() => void 0);
+  }
+}
+async function setPrivateFileMode(filePath) {
+  try {
+    await chmod(filePath, PRIVATE_FILE_MODE);
+  } catch (error) {
+    if (process.platform === "win32") return;
+    throw error;
+  }
+}
+async function verifyPrivateFileMode(filePath) {
+  if (process.platform === "win32") return;
+  const mode = (await stat(filePath)).mode & 511;
+  if (mode !== PRIVATE_FILE_MODE) {
+    throw new Error(`Private file permissions must be 0600: ${filePath}`);
+  }
+}
+function temporaryFilePath(filePath, suffix) {
+  return join(dirname(filePath), `.${basename2(filePath)}.${process.pid}.${randomUUID()}.${suffix}`);
+}
 
 // src/constants.ts
 var DEFAULT_PROFILE = "default";
@@ -3750,16 +3928,15 @@ async function readLegacyStoredConfig() {
   }
 }
 function defaultConfigPath() {
-  return join(homedir(), ".clink-integ-cli", "config.json");
+  return join2(homedir(), ".clink-integ-cli", "config.json");
 }
 function legacyConfigPath() {
-  return join(homedir(), ".clink-dev-cli", "config.json");
+  return join2(homedir(), ".clink-dev-cli", "config.json");
 }
 async function writeStoredConfig(config) {
   const configPath = getConfigPath();
-  await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(config, null, 2)}
-`, "utf8");
+  await writePrivateTextFileAtomically(configPath, `${JSON.stringify(config, null, 2)}
+`);
 }
 function resolveSecretRef(value, envFallbacks) {
   if (value) {
@@ -3811,9 +3988,18 @@ async function resolveRuntimeConfig(options) {
     dashboardEndpoints,
     webhookSigningKey: profileWebhookKey.secret ?? envWebhookKey.secret,
     webhookSigningKeySource: profileWebhookKey.source ?? envWebhookKey.source,
+    apiTimeoutMs: parseApiTimeoutMs(options.timeoutMs ?? process.env.CLINK_API_TIMEOUT_MS),
     dryRun: Boolean(options.dryRun),
     outputMode: options.json ? "json" : "pretty"
   };
+}
+function parseApiTimeoutMs(value) {
+  if (value === void 0) return 3e4;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("Option --timeout-ms must be a positive integer");
+  }
+  return parsed;
 }
 function readEnvironmentFromEnv() {
   const raw = process.env.CLINK_ENV?.trim();
@@ -3873,13 +4059,7 @@ function parseQuery(values) {
   return query;
 }
 function buildUrl(baseUrl, path, query) {
-  const url = new URL(path.replace(/^\//, ""), baseUrl);
-  for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== void 0) {
-      url.searchParams.set(key, String(value));
-    }
-  }
-  return url.toString();
+  return resolveClinkApiUrl(baseUrl, path, query).href;
 }
 function parseJson(raw, source) {
   try {
@@ -3907,16 +4087,17 @@ function registerApi(program2) {
     if ((method === "GET" || method === "DELETE") && body !== void 0) {
       throw new Error(`${method} requests cannot include --data or --data-file`);
     }
-    const result = await client.request(method, normalizePath(path), { query, body });
+    const requestUrl = resolveClinkApiUrl(config.baseUrl, path, query);
+    const result = await client.request(method, requestUrl, { body });
     printResult(
       {
         method,
-        path: normalizePath(path),
+        path: requestUrl.pathname,
         result,
-        curl: method === "GET" || method === "DELETE" ? void 0 : curlForJsonRequest(method, buildUrl(config.baseUrl, path, query), body)
+        curl: method === "GET" || method === "DELETE" ? void 0 : curlForJsonRequest(method, requestUrl.href, body)
       },
       config.outputMode,
-      `Clink API ${method} ${normalizePath(path)} completed. Use --json to view the full response.`
+      `Clink API ${method} ${requestUrl.pathname} completed. Use --json to view the full response.`
     );
   });
 }
@@ -3926,9 +4107,6 @@ function parseMethod(value) {
     return method;
   }
   throw new Error(`Unsupported API method "${value}". Use GET, POST, PUT, PATCH, or DELETE.`);
-}
-function normalizePath(path) {
-  return path.startsWith("/") ? path : `/${path}`;
 }
 
 // src/commands/auth.ts
@@ -4069,8 +4247,8 @@ import { dirname as dirname3 } from "node:path";
 
 // src/catalog-images.ts
 import { createHash } from "node:crypto";
-import { stat, readFile as readFile4 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname2, extname, isAbsolute, posix, resolve } from "node:path";
+import { stat as stat2, readFile as readFile4 } from "node:fs/promises";
+import { basename as basename3, dirname as dirname2, extname, isAbsolute, posix, resolve } from "node:path";
 var PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 var SUPPORTED_IMAGE_MIME_TYPES = /* @__PURE__ */ new Set([
   "image/jpeg",
@@ -4097,7 +4275,7 @@ function supportedImageMimeTypes() {
 }
 async function inspectImageFile(imageFile, options) {
   const resolvedPath = await resolveExistingImagePath(imageFile, options);
-  const info = await stat(resolvedPath);
+  const info = await stat2(resolvedPath);
   if (!info.isFile()) {
     throw new Error(`imageFile must point to a file: ${resolvedPath}`);
   }
@@ -4113,7 +4291,7 @@ async function inspectImageFile(imageFile, options) {
     kind: "file",
     imageFile,
     resolvedPath,
-    fileName: basename2(resolvedPath),
+    fileName: basename3(resolvedPath),
     mimeType,
     sizeBytes: info.size,
     sha256: sha256Hex(buffer)
@@ -4180,7 +4358,7 @@ async function resolveExistingImagePath(imageFile, options) {
   const candidates = isAbsolute(raw) && !options.publicDir ? [resolve(raw)] : resolveCandidateRoots(options).map((root) => resolve(root, raw.startsWith("/") || raw.startsWith("\\") ? strippedRootRelative : raw));
   for (const candidate of Array.from(new Set(candidates))) {
     try {
-      const info = await stat(candidate);
+      const info = await stat2(candidate);
       if (info.isFile()) return candidate;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
@@ -5039,7 +5217,7 @@ function registerCheckout(program2) {
       config.outputMode
     );
   });
-  checkout.command("create").description("Create a checkout session using either product/price IDs or inline price data").option("--customer-id <id>", "Existing Clink customer ID").option("--customer-email <email>", "Customer email").option("--reference-customer-id <id>", "Merchant-side customer ID").requiredOption("--amount <amount>", "Original total amount").requiredOption("--currency <currency>", "Original currency, for example USD").option("--name <name>", "Inline one-time product name").option("--unit-amount <amount>", "Inline product unit amount. Defaults to amount / quantity.").option("--quantity <number>", "Inline one-time product quantity", "1").option("--image-url <url>", "Inline product image URL").option("--product-id <id>", "Registered product ID").option("--price-id <id>", "Registered price ID").option("--merchant-reference-id <id>", "Merchant order/reference ID").option("--success-url <url>", "Success redirect URL").option("--cancel-url <url>", "Cancel redirect URL").option("--ui-mode <mode>", "hostedPage or elements", "hostedPage").option("--return-url <url>", "Return URL for elements mode").option("--payment-method-type <type>", "Default payment method type").option("--allow-promotion-codes", "Enable promotion code entry").option("--promotion-code <code>", "Pre-filled promotion code").option("--open", "Open the hosted checkout URL after creation").action(async (options, command) => {
+  checkout.command("create").description("Create a checkout session using either product/price IDs or inline price data").option("--customer-id <id>", "Existing Clink customer ID").option("--customer-email <email>", "Customer email").option("--reference-customer-id <id>", "Merchant-side customer ID").requiredOption("--amount <amount>", "Original total amount; required for registered and inline checkout").requiredOption("--currency <currency>", "Original currency; required for registered and inline checkout, for example USD").option("--name <name>", "Inline one-time product name").option("--unit-amount <amount>", "Inline product unit amount. Defaults to amount / quantity.").option("--quantity <number>", "Inline one-time product quantity", "1").option("--image-url <url>", "Inline product image URL").option("--product-id <id>", "Registered product ID").option("--price-id <id>", "Registered price ID").option("--merchant-reference-id <id>", "Merchant order/reference ID").option("--success-url <url>", "Success redirect URL").option("--cancel-url <url>", "Cancel redirect URL").option("--ui-mode <mode>", "hostedPage or elements", "hostedPage").option("--return-url <url>", "Return URL for elements mode").option("--payment-method-type <type>", "Default payment method type").option("--allow-promotion-codes", "Enable promotion code entry").option("--promotion-code <code>", "Pre-filled promotion code").option("--open", "Open the hosted checkout URL after creation").action(async (options, command) => {
     const { config, client } = await getCommandContext(command);
     const { body, mode } = buildCheckoutPayload(options);
     const result = await client.post(
@@ -5082,6 +5260,8 @@ function buildCheckoutPayload(options) {
     returnUrl: options.returnUrl,
     paymentMethodType: options.paymentMethodType,
     allowPromotionCodes: Boolean(options.allowPromotionCodes),
+    showPromotionCode: true,
+    localPriceOnly: false,
     promotionCode: options.promotionCode
   };
   if (mode === "registered") {
@@ -5609,57 +5789,11 @@ function roleTypes(value) {
 
 // src/commands/webhook-endpoints.ts
 import { exec } from "node:child_process";
-import { mkdir as mkdir3, readFile as readFile6, writeFile as writeFile3 } from "node:fs/promises";
-import { dirname as dirname4 } from "node:path";
+import { readFile as readFile6, rm as rm2 } from "node:fs/promises";
+import { createInterface } from "node:readline/promises";
 import { promisify } from "node:util";
-var WEBHOOK_ENDPOINT_PATH = "/webhook/endpoints";
-var WEBHOOK_EVENT_CATALOG = [
-  { name: "order.created", code: 1, description: "Order created" },
-  { name: "order.succeeded", code: 2, description: "Order payment succeeded" },
-  { name: "order.failed", code: 3, description: "Order payment failed" },
-  { name: "refund.created", code: 4, description: "Refund created" },
-  { name: "refund.succeeded", code: 5, description: "Refund succeeded" },
-  { name: "refund.failed", code: 6, description: "Refund failed" },
-  { name: "subscription.created", code: 7, description: "Subscription created" },
-  { name: "subscription.trialing", code: 8, description: "Subscription trialing" },
-  { name: "subscription.activated", code: 9, description: "Subscription activated" },
-  { name: "subscription.incomplete_expired", code: 10, description: "Subscription incomplete expired" },
-  { name: "subscription.past_due", code: 11, description: "Subscription past due" },
-  { name: "subscription.cancelled", code: 12, description: "Subscription cancelled" },
-  { name: "invoice.open", code: 13, description: "Invoice open" },
-  { name: "invoice.paid", code: 14, description: "Invoice paid" },
-  { name: "invoice.void", code: 15, description: "Invoice void" },
-  { name: "order.next_action", code: 16, description: "Order next action required" },
-  { name: "subscription.updated.plan_changed", code: 17, description: "Subscription plan changed" },
-  { name: "subscription.updated.plan_change_canceled", code: 18, description: "Subscription plan change canceled" },
-  { name: "subscription.updated.renewed", code: 19, description: "Subscription renewed" },
-  { name: "subscription.updated.cancel_at_period_end_set", code: 20, description: "Subscription cancel at period end set" },
-  { name: "subscription.updated.cancel_at_period_end_revoked", code: 21, description: "Subscription cancel at period end revoked" },
-  { name: "session.complete", code: 22, description: "Checkout session completed" },
-  { name: "session.expired", code: 23, description: "Checkout session expired" },
-  { name: "dispute.created", code: 24, description: "Dispute created" },
-  { name: "dispute.updated", code: 25, description: "Dispute updated" },
-  { name: "dispute.won", code: 26, description: "Dispute won" },
-  { name: "dispute.lost", code: 27, description: "Dispute lost" },
-  { name: "dispute.closed", code: 28, description: "Dispute closed" },
-  { name: "customer.verify", code: 29, description: "Customer verified" },
-  { name: "payment_method.added", code: 30, description: "Payment method added" },
-  { name: "payment_method.default_change", code: 31, description: "Default payment method changed" },
-  { name: "risk_rule.updated", code: 32, description: "Risk rule updated" },
-  { name: "agent_order.succeeded", code: 33, description: "Agent order succeeded" },
-  { name: "agent_order.failed", code: 34, description: "Agent order failed" },
-  { name: "agent_refund.succeeded", code: 35, description: "Agent refund succeeded" },
-  { name: "agent_refund.failed", code: 36, description: "Agent refund failed" },
-  { name: "agent_refund.approved", code: 37, description: "Agent refund approved" },
-  { name: "agent_refund.rejected", code: 38, description: "Agent refund rejected" },
-  { name: "payment_method.update", code: 39, description: "Payment method updated" },
-  { name: "purchase_instruction.created", code: 40, description: "Purchase instruction created" },
-  { name: "purchase_instruction.activated", code: 41, description: "Purchase instruction activated" },
-  { name: "purchase_instruction.updated", code: 42, description: "Purchase instruction updated" },
-  { name: "purchase_instruction.cancelled", code: 43, description: "Purchase instruction cancelled" },
-  { name: "vic_device.binding_succeeded", code: 44, description: "VIC device binding succeeded" }
-];
-var WEBHOOK_ALL_EVENTS = WEBHOOK_EVENT_CATALOG.map((event) => event.name);
+
+// src/webhook/event-catalog.ts
 var WEBHOOK_CORE_EVENTS = [
   "session.complete",
   "order.succeeded",
@@ -5668,24 +5802,217 @@ var WEBHOOK_CORE_EVENTS = [
   "subscription.created",
   "invoice.paid"
 ];
-var WEBHOOK_SUPPORTED_EVENTS = new Set(WEBHOOK_ALL_EVENTS);
+var WEBHOOK_CHECKOUT_EVENTS = [
+  "session.complete",
+  "session.expired",
+  "order.created",
+  "order.succeeded",
+  "order.failed",
+  "order.next_action",
+  "refund.created",
+  "refund.succeeded",
+  "refund.failed"
+];
+var WEBHOOK_SUBSCRIPTION_EVENTS = [
+  "subscription.created",
+  "subscription.trialing",
+  "subscription.activated",
+  "subscription.incomplete_expired",
+  "subscription.past_due",
+  "subscription.cancelled",
+  "subscription.updated.plan_changed",
+  "subscription.updated.plan_change_canceled",
+  "subscription.updated.renewed",
+  "subscription.updated.cancel_at_period_end_set",
+  "subscription.updated.cancel_at_period_end_revoked",
+  "invoice.open",
+  "invoice.paid",
+  "invoice.void"
+];
+var WEBHOOK_DISPUTE_EVENTS = [
+  "dispute.created",
+  "dispute.updated",
+  "dispute.won",
+  "dispute.lost",
+  "dispute.closed"
+];
+var WEBHOOK_PAYMENT_METHOD_EVENTS = [
+  "payment_method.added",
+  "payment_method.default_change",
+  "payment_method.update"
+];
+var WEBHOOK_COMMERCE_EVENTS = [
+  ...WEBHOOK_CHECKOUT_EVENTS,
+  ...WEBHOOK_SUBSCRIPTION_EVENTS,
+  ...WEBHOOK_DISPUTE_EVENTS,
+  ...WEBHOOK_PAYMENT_METHOD_EVENTS
+];
+var REQUIRED_PRESET_EVENTS = {
+  core: WEBHOOK_CORE_EVENTS,
+  checkout: WEBHOOK_CHECKOUT_EVENTS,
+  subscriptions: WEBHOOK_SUBSCRIPTION_EVENTS,
+  disputes: WEBHOOK_DISPUTE_EVENTS,
+  "payment-methods": WEBHOOK_PAYMENT_METHOD_EVENTS,
+  commerce: WEBHOOK_COMMERCE_EVENTS
+};
+var WEBHOOK_PRESET_NAMES = ["core", "checkout", "subscriptions", "disputes", "payment-methods", "commerce", "all"];
+var CORE_WARNING = [
+  `core expands to exactly ${WEBHOOK_CORE_EVENTS.length} compatibility events: ${WEBHOOK_CORE_EVENTS.join(", ")}.`,
+  "It does not cover the complete subscription lifecycle, dunning/past_due, cancellation, disputes/chargebacks, refund.failed, or session.expired."
+].join(" ");
+function parseWebhookRuntimeCatalog(result) {
+  const data = getEnvelopeData(result);
+  const source = isRecord(data) ? data : isRecord(result) ? result : void 0;
+  const rawEvents = source?.events;
+  if (!Array.isArray(rawEvents)) {
+    throw new Error("GET /webhook/events did not return data.events; refusing to resolve webhook presets from a stale local catalog.");
+  }
+  const events = rawEvents.map(parseRuntimeEvent).filter((event) => Boolean(event));
+  if (events.length === 0) {
+    throw new Error("GET /webhook/events returned an empty event catalog; refusing to update webhook endpoint events.");
+  }
+  return {
+    events: dedupeEvents(events),
+    aliases: parseRuntimeAliases(source?.aliases)
+  };
+}
+function resolveWebhookEventSelection(value, catalog, options = {}) {
+  if (!value) throw new Error("Missing required option: --events");
+  const tokens = value.split(",").map((token) => token.trim().toLowerCase()).filter(Boolean);
+  if (tokens.length === 0) {
+    throw new Error(`Option --events must include event names or presets: ${WEBHOOK_PRESET_NAMES.join(", ")}.`);
+  }
+  const numericEvents = tokens.filter((event) => /^\d+$/.test(event));
+  if (numericEvents.length > 0) {
+    throw new Error(`Webhook endpoint Secret Key API accepts event names, not numeric event codes: ${numericEvents.join(", ")}`);
+  }
+  const runtimeEvents = new Set(catalog.events.map((event) => event.name));
+  const resolvedEvents = [];
+  const presets = [];
+  const presetExpansions = {};
+  const missingByToken = /* @__PURE__ */ new Map();
+  for (const token of tokens) {
+    let expansion;
+    if (token === "all") {
+      expansion = catalog.events.map((event) => event.name);
+      presets.push(token);
+    } else if (REQUIRED_PRESET_EVENTS[token]) {
+      const required = [...REQUIRED_PRESET_EVENTS[token]];
+      expansion = required;
+      presets.push(token);
+      const missing = required.filter((event) => !runtimeEvents.has(event));
+      if (missing.length > 0) missingByToken.set(token, missing);
+    } else if (catalog.aliases[token]) {
+      expansion = catalog.aliases[token];
+      presets.push(token);
+      const missing = expansion.filter((event) => !runtimeEvents.has(event));
+      if (missing.length > 0) missingByToken.set(token, missing);
+    } else {
+      expansion = [token];
+      if (!runtimeEvents.has(token)) missingByToken.set(token, [token]);
+    }
+    if (presets.includes(token)) presetExpansions[token] = dedupe(expansion);
+    resolvedEvents.push(...expansion);
+  }
+  if (missingByToken.size > 0) {
+    const details = [...missingByToken.entries()].map(([token, missing]) => `${token}: ${missing.join(", ")}`).join("; ");
+    throw new Error(
+      `Webhook event selection is not supported by the runtime GET /webhook/events catalog. Missing events: ${details}. No events were written.`
+    );
+  }
+  const warnings = [];
+  if (tokens.includes("core")) warnings.push(CORE_WARNING);
+  if (options.allowUnknownEvents) {
+    warnings.push("--allow-unknown-events is deprecated and no longer bypasses runtime GET /webhook/events validation.");
+  }
+  return {
+    input: value,
+    tokens,
+    presets: dedupe(presets),
+    presetExpansions,
+    resolvedEvents: dedupe(resolvedEvents),
+    warnings,
+    runtimeCatalogEventCount: catalog.events.length
+  };
+}
+function parseRuntimeEvent(value) {
+  if (typeof value === "string" && value.length > 0) return { name: value };
+  if (!isRecord(value) || typeof value.name !== "string" || value.name.length === 0) return void 0;
+  return {
+    name: value.name,
+    code: typeof value.code === "number" || typeof value.code === "string" ? value.code : void 0,
+    description: typeof value.description === "string" ? value.description : void 0
+  };
+}
+function parseRuntimeAliases(value) {
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([name, events]) => [name.toLowerCase(), normalizeAliasEvents(events)]).filter((entry) => entry[1].length > 0)
+    );
+  }
+  if (Array.isArray(value)) {
+    const aliases = {};
+    for (const item of value) {
+      if (!isRecord(item) || typeof item.name !== "string") continue;
+      const events = normalizeAliasEvents(item.events);
+      if (events.length > 0) aliases[item.name.toLowerCase()] = events;
+    }
+    return aliases;
+  }
+  return {};
+}
+function normalizeAliasEvents(value) {
+  const events = Array.isArray(value) ? value.filter((event) => typeof event === "string") : typeof value === "string" ? value.split(",") : [];
+  return dedupe(events.map((event) => event.trim()).filter(Boolean));
+}
+function dedupeEvents(events) {
+  const seen = /* @__PURE__ */ new Set();
+  return events.filter((event) => {
+    if (seen.has(event.name)) return false;
+    seen.add(event.name);
+    return true;
+  });
+}
+function dedupe(values) {
+  return [...new Set(values)];
+}
+function getEnvelopeData(result) {
+  return isRecord(result) && "data" in result ? result.data : void 0;
+}
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// src/commands/webhook-endpoints.ts
+var WEBHOOK_ENDPOINT_PATH = "/webhook/endpoints";
 var WEBHOOK_SIGNING_KEY_ENV = "CLINK_WEBHOOK_SIGNING_KEY";
 var execAsync = promisify(exec);
+var ENDPOINT_EVENT_PRESET_HELP = [
+  "",
+  "Preset expansion (validated against the selected environment's GET /webhook/events):",
+  `  core (${WEBHOOK_CORE_EVENTS.length}; compatibility only): ${WEBHOOK_CORE_EVENTS.join(", ")}`,
+  "    Warning: core omits the full subscription lifecycle, dunning/past_due, cancellation, disputes/chargebacks, refund.failed, and session.expired.",
+  `  checkout (${WEBHOOK_CHECKOUT_EVENTS.length}): ${WEBHOOK_CHECKOUT_EVENTS.join(", ")}`,
+  `  subscriptions (${WEBHOOK_SUBSCRIPTION_EVENTS.length}): ${WEBHOOK_SUBSCRIPTION_EVENTS.join(", ")}`,
+  `  disputes (${WEBHOOK_DISPUTE_EVENTS.length}): ${WEBHOOK_DISPUTE_EVENTS.join(", ")}`,
+  `  payment-methods (${WEBHOOK_PAYMENT_METHOD_EVENTS.length}): ${WEBHOOK_PAYMENT_METHOD_EVENTS.join(", ")}`,
+  `  commerce (${WEBHOOK_COMMERCE_EVENTS.length}): ${WEBHOOK_COMMERCE_EVENTS.join(", ")}`,
+  "  all (dynamic): every event returned by the runtime catalog, including future additions."
+].join("\n");
 function registerWebhookEndpointSubcommands(parent, options = {}) {
-  parent.command("events").description("List Secret Key API-supported webhook event names").action(async function() {
+  parent.command("events").description("List the runtime webhook event catalog, aliases, and CLI presets").addHelpText("after", ENDPOINT_EVENT_PRESET_HELP).action(async function() {
     const { config, client } = await getCommandContext(this);
-    const result = await client.get("/webhook/events");
+    const { result, catalog } = await loadRuntimeWebhookCatalog(client);
+    const presets = describeRuntimePresets(catalog);
     printResult(
       {
         result,
-        fallbackSupportedEvents: WEBHOOK_EVENT_CATALOG,
-        fallbackAliases: {
-          all: WEBHOOK_ALL_EVENTS,
-          core: WEBHOOK_CORE_EVENTS
-        }
+        events: catalog.events,
+        aliases: catalog.aliases,
+        presets
       },
       config.outputMode,
-      config.dryRun ? "Webhook event list dry-run generated. Use --json to view request metadata." : formatEventResult(result)
+      [formatEventCatalog(catalog.events), "", formatPresetCatalog(presets)].join("\n")
     );
   });
   const list = parent.command("list").description("List webhook endpoints for the current Secret Key merchant").option("--page <number>", "Page number", "1").option("--page-size <number>", "Page size", "20").option("--enabled <boolean>", "Filter by enabled status").option("--url <https-url>", "Filter by exact endpoint URL");
@@ -5727,33 +6054,40 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
       config.dryRun ? "Webhook endpoint get dry-run generated. Use --json to view request metadata." : formatEndpointLine(extractEndpoint(result))
     );
   });
-  const create = parent.command("create").description("Create a webhook endpoint with the Secret Key API").requiredOption("--url <https-url>", "HTTPS webhook endpoint URL").requiredOption("--events <events>", "Comma-separated event names, core, or all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--save-secret", "Save the returned signing secret into the current clink profile").option("--show-secret", "Print the full signing secret in command output").option("--allow-unknown-events", "Send event names without local validation").option("--disabled", "Create the webhook but leave it disabled");
+  const create = parent.command("create").description("Create a webhook endpoint with the Secret Key API").requiredOption("--url <https-url>", "HTTPS webhook endpoint URL").requiredOption("--events <events>", "Event names or combinable presets: core, checkout, subscriptions, disputes, payment-methods, commerce, all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--save-secret", "Save the returned signing secret into the current clink profile").option("--show-secret", "Print the full signing secret in command output").option("--allow-unknown-events", "Deprecated; runtime GET /webhook/events validation is always enforced").option("--disabled", "Create the webhook but leave it disabled").addHelpText("after", ENDPOINT_EVENT_PRESET_HELP);
   addEnvSyncOptions(create);
   addLegacyDashboardOptions(create, options);
   create.action(async function(createOptions) {
     const { config, client } = await getCommandContext(this);
+    const { catalog } = await loadRuntimeWebhookCatalog(client);
+    const eventSelection = resolveWebhookEventSelection(createOptions.events, catalog, {
+      allowUnknownEvents: Boolean(createOptions.allowUnknownEvents)
+    });
     const body = {
       url: parseHttpsEndpoint(createOptions.url),
-      events: parseWebhookEvents(createOptions.events, Boolean(createOptions.allowUnknownEvents)),
+      events: eventSelection.resolvedEvents,
       description: getDescription(createOptions),
       enabled: !createOptions.disabled
     };
+    await preflightSigningSecretDestinations(createOptions, config.dryRun);
     const result = await client.post(WEBHOOK_ENDPOINT_PATH, { body });
-    await saveSigningSecretIfRequested(config.profile, result, Boolean(createOptions.saveSecret), config.dryRun);
-    const envSync = await syncEnvAndRestartIfRequested(createOptions, result, config.dryRun);
+    const persistence = await persistSigningSecretDestinations(config.profile, createOptions, result, config.dryRun);
+    const envSync = await finishRestartAfterPersistence(createOptions, persistence, config.dryRun);
     const endpoint = extractEndpoint(result);
     printResult(
       {
         profile: config.profile,
         ignoredMerchantId: createOptions.merchantId,
-        saved: Boolean(createOptions.saveSecret),
+        eventSelection,
+        saved: persistence.saved,
         envSync,
         endpoint: maskWebhookSecrets(endpoint, Boolean(createOptions.showSecret)),
         result: maskWebhookSecrets(result, Boolean(createOptions.showSecret))
       },
       config.outputMode,
-      config.dryRun ? "Webhook endpoint create dry-run generated. Use --json to view request metadata." : [
-        `Created webhook endpoint: ${endpoint?.url ?? body.url}`,
+      [
+        formatEventSelection(eventSelection),
+        config.dryRun ? "Dry run: webhook endpoint create request generated; no endpoint was written." : `Created webhook endpoint: ${endpoint?.url ?? body.url}`,
         `Endpoint ID: ${endpoint?.id ?? "unknown"}`,
         `Events: ${(endpoint?.events ?? body.events).join(", ")}`,
         formatSigningSecretLine(endpoint, Boolean(createOptions.showSecret)),
@@ -5762,36 +6096,44 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
       ].filter(Boolean).join("\n")
     );
   });
-  const update = parent.command("update <endpoint-id>").description("Update a webhook endpoint with the Secret Key API").option("--url <https-url>", "HTTPS webhook endpoint URL").option("--events <events>", "Comma-separated event names, core, or all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--enabled <boolean>", "Set enabled status").option("--disabled", "Disable the webhook endpoint").option("--allow-unknown-events", "Send event names without local validation").option("--rotate-secret", "Rotate the signing secret after updating").option("--save-secret", "Save the rotated signing secret into the current clink profile").option("--show-secret", "Print the full rotated signing secret in command output");
+  const update = parent.command("update <endpoint-id>").description("Update a webhook endpoint with the Secret Key API").option("--url <https-url>", "HTTPS webhook endpoint URL").option("--events <events>", "Event names or combinable presets: core, checkout, subscriptions, disputes, payment-methods, commerce, all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--enabled <boolean>", "Set enabled status").option("--disabled", "Disable the webhook endpoint").option("--allow-unknown-events", "Deprecated; runtime GET /webhook/events validation is always enforced").option("--rotate-secret", "Rotate the signing secret after updating").option("--save-secret", "Save the rotated signing secret into the current clink profile").option("--show-secret", "Print the full rotated signing secret in command output").addHelpText("after", ENDPOINT_EVENT_PRESET_HELP);
   addEnvSyncOptions(update);
   addLegacyDashboardOptions(update, options);
   update.action(async function(endpointId, updateOptions) {
     requireOption("endpoint-id", endpointId);
     const { config, client } = await getCommandContext(this);
-    const body = buildUpdateBody(updateOptions);
+    const eventSelection = updateOptions.events ? resolveWebhookEventSelection(
+      updateOptions.events,
+      (await loadRuntimeWebhookCatalog(client)).catalog,
+      { allowUnknownEvents: Boolean(updateOptions.allowUnknownEvents) }
+    ) : void 0;
+    const body = buildUpdateBody(updateOptions, eventSelection?.resolvedEvents);
     const shouldRotate = Boolean(updateOptions.rotateSecret || updateOptions.saveSecret || updateOptions.showSecret || updateOptions.syncEnvFile);
     if (Object.keys(body).length === 0 && !shouldRotate) {
       throw new Error("Provide at least one of --url, --events, --description, --remark, --enabled, --disabled, or --rotate-secret.");
     }
+    await preflightSigningSecretDestinations(updateOptions, config.dryRun);
     const updateResult = Object.keys(body).length > 0 ? await client.patch(`${WEBHOOK_ENDPOINT_PATH}/${encodeURIComponent(endpointId)}`, { body }) : void 0;
     const rotateResult = shouldRotate ? await client.post(`${WEBHOOK_ENDPOINT_PATH}/${encodeURIComponent(endpointId)}/rotate-secret`) : void 0;
-    await saveSigningSecretIfRequested(config.profile, rotateResult ?? updateResult, Boolean(updateOptions.saveSecret), config.dryRun);
     const result = rotateResult ?? updateResult;
-    const envSync = await syncEnvAndRestartIfRequested(updateOptions, result, config.dryRun);
+    const persistence = await persistSigningSecretDestinations(config.profile, updateOptions, result, config.dryRun);
+    const envSync = await finishRestartAfterPersistence(updateOptions, persistence, config.dryRun);
     const endpoint = extractEndpoint(result);
     printResult(
       {
         profile: config.profile,
         ignoredMerchantId: updateOptions.merchantId,
-        saved: Boolean(updateOptions.saveSecret),
+        eventSelection,
+        saved: persistence.saved,
         envSync,
         updateResult: maskWebhookSecrets(updateResult, false),
         rotateResult: maskWebhookSecrets(rotateResult, Boolean(updateOptions.showSecret)),
         endpoint: maskWebhookSecrets(endpoint, Boolean(updateOptions.showSecret))
       },
       config.outputMode,
-      config.dryRun ? "Webhook endpoint update dry-run generated. Use --json to view request metadata." : [
-        `Updated webhook endpoint: ${endpoint?.url ?? endpointId}`,
+      [
+        eventSelection ? formatEventSelection(eventSelection) : void 0,
+        config.dryRun ? "Dry run: webhook endpoint update request generated; no endpoint was written." : `Updated webhook endpoint: ${endpoint?.url ?? endpointId}`,
         `Endpoint ID: ${endpoint?.id ?? endpointId}`,
         endpoint?.events ? `Events: ${endpoint.events.join(", ")}` : void 0,
         formatSigningSecretLine(endpoint, Boolean(updateOptions.showSecret)),
@@ -5825,14 +6167,15 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
   rotateSecret.action(async function(endpointId, rotateOptions) {
     requireOption("endpoint-id", endpointId);
     const { config, client } = await getCommandContext(this);
+    await preflightSigningSecretDestinations(rotateOptions, config.dryRun);
     const result = await client.post(`${WEBHOOK_ENDPOINT_PATH}/${encodeURIComponent(endpointId)}/rotate-secret`);
-    await saveSigningSecretIfRequested(config.profile, result, Boolean(rotateOptions.saveSecret), config.dryRun);
-    const envSync = await syncEnvAndRestartIfRequested(rotateOptions, result, config.dryRun);
+    const persistence = await persistSigningSecretDestinations(config.profile, rotateOptions, result, config.dryRun);
+    const envSync = await finishRestartAfterPersistence(rotateOptions, persistence, config.dryRun);
     const endpoint = extractEndpoint(result);
     printResult(
       {
         profile: config.profile,
-        saved: Boolean(rotateOptions.saveSecret),
+        saved: persistence.saved,
         envSync,
         endpoint: maskWebhookSecrets(endpoint, Boolean(rotateOptions.showSecret)),
         result: maskWebhookSecrets(result, Boolean(rotateOptions.showSecret))
@@ -5847,17 +6190,38 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
       ].filter(Boolean).join("\n")
     );
   });
-  const ensure = parent.command("ensure").description("Create or update a webhook endpoint by URL with the Secret Key API").requiredOption("--url <https-url>", "HTTPS webhook endpoint URL").requiredOption("--events <events>", "Comma-separated event names, core, or all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--save-secret", "Save the resolved signing secret into the current clink profile").option("--show-secret", "Print the full signing secret in command output").option("--allow-unknown-events", "Send event names without local validation").option("--disabled", "Create or update the webhook but leave it disabled").option("--return-signing-secret", "Request plaintext signing secret when available").option("--rotate-secret", "Always rotate the signing secret for an existing endpoint").option("--no-rotate-secret-if-unavailable", "Do not rotate existing endpoints when plaintext secret is unavailable");
+  const ensure = parent.command("ensure").description("Create or merge a webhook endpoint by URL; use --allow-remove-events for explicit replacement").requiredOption("--url <https-url>", "HTTPS webhook endpoint URL").requiredOption("--events <events>", "Event names or combinable presets: core, checkout, subscriptions, disputes, payment-methods, commerce, all").option("--description <text>", "Webhook endpoint description").option("--remark <text>", "Alias for --description").option("--save-secret", "Save the resolved signing secret into the current clink profile").option("--show-secret", "Print the full signing secret in command output").option("--allow-unknown-events", "Deprecated; runtime GET /webhook/events validation is always enforced").option("--allow-remove-events", "Replace the endpoint event set and explicitly allow removal of existing events").option("--disabled", "Create or update the webhook but leave it disabled").option("--return-signing-secret", "Request plaintext signing secret when available").option("--rotate-secret", "Always rotate the signing secret for an existing endpoint").option("--no-rotate-secret-if-unavailable", "Do not rotate existing endpoints when plaintext secret is unavailable").addHelpText("after", ENDPOINT_EVENT_PRESET_HELP);
   addEnvSyncOptions(ensure);
   addLegacyDashboardOptions(ensure, options);
   ensure.action(async function(ensureOptions) {
     const { config, client } = await getCommandContext(this);
-    const wantsSigningSecret = Boolean(
-      ensureOptions.saveSecret || ensureOptions.showSecret || ensureOptions.returnSigningSecret || ensureOptions.rotateSecret || ensureOptions.syncEnvFile
+    const { catalog } = await loadRuntimeWebhookCatalog(client);
+    const eventSelection = resolveWebhookEventSelection(ensureOptions.events, catalog, {
+      allowUnknownEvents: Boolean(ensureOptions.allowUnknownEvents)
+    });
+    const endpointUrl = parseHttpsEndpoint(ensureOptions.url);
+    const preflight = await findWebhookEndpointByUrl(client, endpointUrl);
+    const existingEvents = preflight.endpoint?.events ?? [];
+    const operation = preflight.endpoint ? ensureOptions.allowRemoveEvents ? "replace" : "merge" : "create";
+    const finalEvents = operation === "replace" ? eventSelection.resolvedEvents : mergeWebhookEvents(existingEvents, eventSelection.resolvedEvents);
+    const eventDiff = diffWebhookEvents(existingEvents, finalEvents);
+    if (eventDiff.removed.length > 0) {
+      printEnsureRemovalPreview(config.outputMode, eventDiff, finalEvents);
+    }
+    await authorizeEventRemoval(eventDiff, operation === "replace");
+    const hasSecretDestination = Boolean(
+      ensureOptions.saveSecret || ensureOptions.showSecret || ensureOptions.syncEnvFile
     );
+    if ((ensureOptions.returnSigningSecret || ensureOptions.rotateSecret) && !hasSecretDestination) {
+      throw new Error(
+        "Options --return-signing-secret and --rotate-secret require --save-secret, --sync-env-file, or explicit --show-secret so a rotated secret is not discarded."
+      );
+    }
+    await preflightSigningSecretDestinations(ensureOptions, config.dryRun);
+    const wantsSigningSecret = hasSecretDestination;
     const body = {
-      url: parseHttpsEndpoint(ensureOptions.url),
-      events: parseWebhookEvents(ensureOptions.events, Boolean(ensureOptions.allowUnknownEvents)),
+      url: endpointUrl,
+      events: finalEvents,
       description: getDescription(ensureOptions),
       enabled: !ensureOptions.disabled,
       returnSigningSecret: wantsSigningSecret || void 0,
@@ -5868,15 +6232,48 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
       `${WEBHOOK_ENDPOINT_PATH}/ensure`,
       { body }
     );
-    await saveSigningSecretIfRequested(config.profile, result, Boolean(ensureOptions.saveSecret), config.dryRun);
-    const envSync = await syncEnvAndRestartIfRequested(ensureOptions, result, config.dryRun);
     const data = result.data;
     const endpoint = data?.endpoint;
+    const persistence = await persistSigningSecretDestinations(
+      config.profile,
+      ensureOptions,
+      result,
+      config.dryRun
+    );
+    const envSync = await finishRestartAfterPersistence(ensureOptions, persistence, config.dryRun);
+    let verifiedEndpoint;
+    const verification = config.dryRun ? { performed: false, status: "skipped-dry-run" } : { performed: true, status: "verified" };
+    if (!config.dryRun) {
+      try {
+        verifiedEndpoint = await readBackWebhookEndpoint(client, endpoint, endpointUrl);
+        assertWebhookEventsMatch(verifiedEndpoint?.events, finalEvents, endpointUrl);
+      } catch (error) {
+        if (ensureOptions.showSecret && persistence.signingSecret) {
+          process.stderr.write(`Signing secret recovery (explicit --show-secret): ${persistence.signingSecret}
+`);
+        }
+        const persistenceNotice = envSync?.restart ? "The returned signing secret was persisted and the requested restart completed before read-back." : envSync?.restartRequired ? "The returned signing secret was persisted before read-back; restart or redeploy the application now." : persistence.saved ? "The returned signing secret was saved to the CLI profile before read-back; synchronize the application runtime if needed." : void 0;
+        throw new Error([
+          error instanceof Error ? error.message : String(error),
+          persistenceNotice
+        ].filter(Boolean).join(" "));
+      }
+    }
     printResult(
       {
         profile: config.profile,
         ignoredMerchantId: ensureOptions.merchantId,
-        saved: Boolean(ensureOptions.saveSecret),
+        operation,
+        eventSelection,
+        requestedEvents: eventSelection.resolvedEvents,
+        finalEvents,
+        eventDiff,
+        allowRemoveEvents: Boolean(ensureOptions.allowRemoveEvents),
+        existingEndpoint: maskWebhookSecrets(preflight.endpoint, false),
+        preflightResult: maskWebhookSecrets(preflight.result, false),
+        verification,
+        verifiedEndpoint: maskWebhookSecrets(verifiedEndpoint, false),
+        saved: persistence.saved,
         envSync,
         source: data?.source,
         signingSecretAvailable: data?.signingSecretAvailable,
@@ -5886,11 +6283,16 @@ function registerWebhookEndpointSubcommands(parent, options = {}) {
         result: maskWebhookSecrets(result, Boolean(ensureOptions.showSecret))
       },
       config.outputMode,
-      config.dryRun ? "Webhook endpoint ensure dry-run generated. Use --json to view request metadata." : [
+      [
+        formatEventSelection(eventSelection),
+        formatEnsureEventBehavior(operation),
+        formatEventDiff(eventDiff),
+        config.dryRun ? "Dry run: no endpoint was written and read-back verification was skipped." : void 0,
         `${formatEnsureSource(data?.source)} webhook endpoint: ${endpoint?.url ?? body.url}`,
         `Endpoint ID: ${endpoint?.id ?? "unknown"}`,
         `Events: ${(endpoint?.events ?? body.events).join(", ")}`,
         `Enabled: ${endpoint?.enabled ?? body.enabled}`,
+        config.dryRun ? void 0 : "Read-back verification: final event set exactly matches the computed target events.",
         formatSigningSecretLine(endpoint, Boolean(ensureOptions.showSecret)),
         ensureOptions.saveSecret ? `Saved signing secret into profile "${config.profile}".` : "Signing secret was not saved. Re-run with --save-secret to store it.",
         formatEnvSyncLine(envSync),
@@ -5924,10 +6326,13 @@ async function updateEndpointEnabled(command, endpointId, enabled) {
     config.dryRun ? `Webhook endpoint ${enabled ? "enable" : "disable"} dry-run generated. Use --json to view request metadata.` : `${enabled ? "Enabled" : "Disabled"} webhook endpoint: ${endpoint?.url ?? endpointId}`
   );
 }
-function buildUpdateBody(options) {
+function buildUpdateBody(options, resolvedEvents) {
   const body = {};
   if (options.url) body.url = parseHttpsEndpoint(options.url);
-  if (options.events) body.events = parseWebhookEvents(options.events, Boolean(options.allowUnknownEvents));
+  if (options.events) {
+    if (!resolvedEvents) throw new Error("Internal error: webhook events were not resolved from the runtime catalog.");
+    body.events = resolvedEvents;
+  }
   const description = getDescription(options);
   if (description !== void 0) body.description = description;
   const enabled = parseEndpointEnabled(options);
@@ -5979,24 +6384,136 @@ function isBlockedWebhookHost(hostname) {
   }
   return false;
 }
-function parseWebhookEvents(value, allowUnknownEvents) {
-  requireOption("--events", value);
-  const normalized = value.trim().toLowerCase();
-  const events = normalized === "core" ? [...WEBHOOK_CORE_EVENTS] : normalized === "all" ? [...WEBHOOK_ALL_EVENTS] : value.split(",").map((event) => event.trim()).filter(Boolean);
-  if (events.length === 0) {
-    throw new Error("Option --events must include at least one event, core, or all.");
-  }
-  const numericEvents = events.filter((event) => /^\d+$/.test(event));
-  if (numericEvents.length > 0) {
-    throw new Error(`Webhook endpoint Secret Key API accepts event names, not numeric event codes: ${numericEvents.join(", ")}`);
-  }
-  if (!allowUnknownEvents) {
-    const unknown = events.filter((event) => !WEBHOOK_SUPPORTED_EVENTS.has(event));
-    if (unknown.length > 0) {
-      throw new Error(`Unknown webhook event(s): ${unknown.join(", ")}. Run clink webhook endpoint events, or pass --allow-unknown-events.`);
+async function loadRuntimeWebhookCatalog(client) {
+  const result = await client.get("/webhook/events", { executeInDryRun: true });
+  return { result, catalog: parseWebhookRuntimeCatalog(result) };
+}
+function describeRuntimePresets(catalog) {
+  const presets = {};
+  for (const name of WEBHOOK_PRESET_NAMES) {
+    try {
+      presets[name] = resolveWebhookEventSelection(name, catalog).resolvedEvents;
+    } catch (error) {
+      presets[name] = { unavailable: error instanceof Error ? error.message : String(error) };
     }
   }
-  return [...new Set(events)];
+  return presets;
+}
+async function findWebhookEndpointByUrl(client, url) {
+  const result = await client.get(WEBHOOK_ENDPOINT_PATH, {
+    query: { pageNum: 1, pageSize: 100, url },
+    executeInDryRun: true
+  });
+  const endpoint = extractEndpointRows(result).find((candidate) => sameEndpointUrl(candidate.url, url));
+  if (!endpoint || Array.isArray(endpoint.events)) return { result, endpoint };
+  if (endpoint.id) {
+    const detailResult = await client.get(
+      `${WEBHOOK_ENDPOINT_PATH}/${encodeURIComponent(endpoint.id)}`,
+      { executeInDryRun: true }
+    );
+    const detailed = extractEndpoint(detailResult);
+    if (detailed && Array.isArray(detailed.events)) {
+      return { result, endpoint: detailed };
+    }
+  }
+  throw new Error(
+    `Existing webhook endpoint at ${url} did not expose its current events; refusing to merge or replace an unknown event set.`
+  );
+}
+function diffWebhookEvents(existing, resolved) {
+  const existingSet = new Set(existing);
+  const resolvedSet = new Set(resolved);
+  return {
+    added: resolved.filter((event) => !existingSet.has(event)),
+    removed: existing.filter((event) => !resolvedSet.has(event)),
+    unchanged: resolved.filter((event) => existingSet.has(event))
+  };
+}
+function mergeWebhookEvents(existing, requested) {
+  return [.../* @__PURE__ */ new Set([...existing, ...requested])];
+}
+function printEnsureRemovalPreview(mode, diff, finalEvents) {
+  if (mode === "json") {
+    process.stderr.write(`${JSON.stringify({
+      kind: "webhook_endpoint_ensure_preview",
+      operation: "replace",
+      eventDiff: diff,
+      finalEvents
+    })}
+`);
+    return;
+  }
+  process.stderr.write(`Webhook endpoint replacement preview. ${formatEventDiff(diff)} Final events (${finalEvents.length}): ${finalEvents.join(", ")}
+`);
+}
+async function authorizeEventRemoval(diff, allowRemoveEvents) {
+  if (diff.removed.length === 0) return;
+  if (!allowRemoveEvents) {
+    throw new Error(
+      [
+        "The computed webhook endpoint target would remove existing events.",
+        formatEventDiff(diff),
+        "Use --allow-remove-events to select explicit replacement semantics. No endpoint update was sent."
+      ].join(" ")
+    );
+  }
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return;
+  const prompt = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await prompt.question(
+      `Ensure will remove ${diff.removed.length} event(s): ${diff.removed.join(", ")}. Continue? [y/N] `
+    );
+    if (!/^(?:y|yes)$/i.test(answer.trim())) {
+      throw new Error("Webhook endpoint ensure cancelled; no endpoint update was sent.");
+    }
+  } finally {
+    prompt.close();
+  }
+}
+async function readBackWebhookEndpoint(client, endpoint, url) {
+  if (endpoint?.id) {
+    const result = await client.get(
+      `${WEBHOOK_ENDPOINT_PATH}/${encodeURIComponent(endpoint.id)}`,
+      { executeInDryRun: true }
+    );
+    const detailed = extractEndpoint(result);
+    if (detailed) return detailed;
+  }
+  const fromList = await findWebhookEndpointByUrl(client, url);
+  if (fromList.endpoint) return fromList.endpoint;
+  throw new Error(`Webhook endpoint ensure could not read back the endpoint at ${url}; final event set is unverified.`);
+}
+function assertWebhookEventsMatch(actual, expected, url) {
+  const actualNormalized = normalizeEventSet(actual ?? []);
+  const expectedNormalized = normalizeEventSet(expected);
+  if (actualNormalized.join("\n") === expectedNormalized.join("\n")) return;
+  throw new Error(
+    [
+      `Webhook endpoint ensure read-back mismatch for ${url}.`,
+      `Expected: ${expectedNormalized.join(", ") || "(none)"}.`,
+      `Actual: ${actualNormalized.join(", ") || "(none)"}.`,
+      "The endpoint update response is not accepted as verified."
+    ].join(" ")
+  );
+}
+function extractEndpointRows(result) {
+  if (isRecord2(result) && Array.isArray(result.rows)) return result.rows.filter(isRecord2);
+  const data = getEnvelopeData2(result);
+  if (Array.isArray(data)) return data.filter(isRecord2);
+  if (isRecord2(data) && Array.isArray(data.rows)) return data.rows.filter(isRecord2);
+  if (isRecord2(data) && Array.isArray(data.endpoints)) return data.endpoints.filter(isRecord2);
+  return [];
+}
+function sameEndpointUrl(left, right) {
+  if (!left) return false;
+  try {
+    return new URL(left).toString() === new URL(right).toString();
+  } catch {
+    return left === right;
+  }
+}
+function normalizeEventSet(events) {
+  return [...new Set(events)].sort();
 }
 function parseOptionalBoolean(name, value) {
   if (value === void 0) return void 0;
@@ -6019,54 +6536,96 @@ function parsePageSizeOption(value) {
   return parsed;
 }
 function extractEndpoint(result) {
-  const data = getEnvelopeData(result);
-  if (isRecord(data) && isRecord(data.endpoint)) return data.endpoint;
-  return isRecord(data) ? data : void 0;
+  const data = getEnvelopeData2(result);
+  if (isRecord2(data) && isRecord2(data.endpoint)) return data.endpoint;
+  return isRecord2(data) ? data : void 0;
 }
-function getEnvelopeData(result) {
-  return isRecord(result) && "data" in result ? result.data : void 0;
+function getEnvelopeData2(result) {
+  return isRecord2(result) && "data" in result ? result.data : void 0;
 }
 function extractSigningSecret(result) {
   const endpoint = extractEndpoint(result);
   return typeof endpoint?.signingSecret === "string" && endpoint.signingSecret.length > 0 ? endpoint.signingSecret : void 0;
 }
-async function saveSigningSecretIfRequested(profile, result, enabled, dryRun) {
-  if (!enabled) return extractSigningSecret(result);
-  if (dryRun) return void 0;
-  const signingSecret = requireSigningSecret(result);
-  await saveProfile(profile, { webhookSigningKey: signingSecret });
-  return signingSecret;
+async function preflightSigningSecretDestinations(options, dryRun) {
+  if (options.restartCommand && !options.syncEnvFile) {
+    throw new Error("Option --restart-command requires --sync-env-file.");
+  }
+  if (dryRun) return;
+  if (options.saveSecret) {
+    await assertAtomicTextFileTarget(getConfigPath());
+  }
+  if (options.syncEnvFile) {
+    await assertAtomicTextFileTarget(options.syncEnvFile);
+  }
 }
-async function syncEnvAndRestartIfRequested(options, result, dryRun) {
-  if (!options.syncEnvFile) return void 0;
+async function persistSigningSecretDestinations(profile, options, result, dryRun) {
+  const shouldSave = Boolean(options.saveSecret);
+  const shouldSync = Boolean(options.syncEnvFile);
+  if (!shouldSave && !shouldSync) {
+    return { saved: false, signingSecret: extractSigningSecret(result) };
+  }
   if (dryRun) {
     return {
-      envFile: options.syncEnvFile,
-      key: WEBHOOK_SIGNING_KEY_ENV,
-      dryRun: true,
-      restartRequired: !options.restartCommand,
-      restart: options.restartCommand ? { command: options.restartCommand, ok: true } : void 0
+      saved: false,
+      envSync: options.syncEnvFile ? {
+        envFile: options.syncEnvFile,
+        key: WEBHOOK_SIGNING_KEY_ENV,
+        dryRun: true,
+        restartRequired: !options.restartCommand,
+        restart: options.restartCommand ? { command: sanitizeSensitiveText(options.restartCommand), ok: true } : void 0
+      } : void 0
     };
   }
   const signingSecret = requireSigningSecret(result);
-  await writeEnvFileValue(options.syncEnvFile, WEBHOOK_SIGNING_KEY_ENV, signingSecret);
-  const envSync = {
-    envFile: options.syncEnvFile,
-    key: WEBHOOK_SIGNING_KEY_ENV,
-    written: true,
-    restartRequired: !options.restartCommand
-  };
-  if (options.restartCommand) {
-    envSync.restart = await runRestartCommand(options.restartCommand);
-    envSync.restartRequired = false;
+  let envSnapshot;
+  try {
+    if (options.syncEnvFile) {
+      envSnapshot = await writeEnvFileValue(options.syncEnvFile, WEBHOOK_SIGNING_KEY_ENV, signingSecret);
+    }
+    if (shouldSave) {
+      await saveProfile(profile, { webhookSigningKey: signingSecret });
+    }
+  } catch (error) {
+    if (envSnapshot) {
+      try {
+        await restoreEnvFileSnapshot(envSnapshot);
+      } catch (rollbackError) {
+        throw new Error(
+          `Signing secret persistence failed and env rollback also failed: ${sanitizeErrorMessage(error, signingSecret)}; rollback: ${sanitizeErrorMessage(rollbackError, signingSecret)}`
+        );
+      }
+    }
+    throw new Error(
+      `Signing secret persistence failed: ${sanitizeErrorMessage(error, signingSecret)} Remote endpoint state may already have changed; fix the local destination, then rotate and resync the endpoint secret before accepting webhooks.`
+    );
   }
+  return {
+    saved: shouldSave,
+    signingSecret,
+    envSync: options.syncEnvFile ? {
+      envFile: options.syncEnvFile,
+      key: WEBHOOK_SIGNING_KEY_ENV,
+      written: true,
+      restartRequired: !options.restartCommand
+    } : void 0
+  };
+}
+async function finishRestartAfterPersistence(options, persistence, dryRun) {
+  const envSync = persistence.envSync;
+  if (!envSync || dryRun || !options.restartCommand) return envSync;
+  if (!persistence.signingSecret) {
+    throw new Error("Internal error: restart requested without a resolved webhook signing secret.");
+  }
+  envSync.restart = await runRestartCommand(options.restartCommand, persistence.signingSecret);
+  envSync.restartRequired = false;
   return envSync;
 }
 function requireSigningSecret(result) {
   const signingSecret = extractSigningSecret(result);
   if (signingSecret) return signingSecret;
-  const data = getEnvelopeData(result);
-  const nextAction = isRecord(data) && typeof data.nextAction === "string" ? data.nextAction : void 0;
+  const data = getEnvelopeData2(result);
+  const nextAction = isRecord2(data) && typeof data.nextAction === "string" ? data.nextAction : void 0;
   throw new Error(
     [
       "Clink did not return a plaintext webhook signing secret.",
@@ -6076,13 +6635,22 @@ function requireSigningSecret(result) {
 }
 async function writeEnvFileValue(filePath, key, value) {
   let raw = "";
+  let existed = true;
   try {
     raw = await readFile6(filePath, "utf8");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
+    existed = false;
   }
-  await mkdir3(dirname4(filePath), { recursive: true });
-  await writeFile3(filePath, upsertEnvValue(raw, key, value), "utf8");
+  await writePrivateTextFileAtomically(filePath, upsertEnvValue(raw, key, value));
+  return { filePath, existed, raw };
+}
+async function restoreEnvFileSnapshot(snapshot) {
+  if (snapshot.existed) {
+    await writePrivateTextFileAtomically(snapshot.filePath, snapshot.raw);
+  } else {
+    await rm2(snapshot.filePath, { force: true });
+  }
 }
 function upsertEnvValue(raw, key, value) {
   const line = `${key}=${formatEnvValue(value)}`;
@@ -6098,14 +6666,28 @@ function upsertEnvValue(raw, key, value) {
 function formatEnvValue(value) {
   return /^[A-Za-z0-9_./:=+-]+$/.test(value) ? value : JSON.stringify(value);
 }
-async function runRestartCommand(command) {
-  const { stdout, stderr } = await execAsync(command, { windowsHide: true });
-  return {
-    command,
-    ok: true,
-    stdout: truncateCommandOutput(stdout),
-    stderr: truncateCommandOutput(stderr)
-  };
+async function runRestartCommand(command, signingSecret) {
+  try {
+    const { stdout, stderr } = await execAsync(command, { windowsHide: true });
+    return {
+      command: sanitizeSensitiveText(command, signingSecret),
+      ok: true,
+      stdout: truncateCommandOutput(sanitizeSensitiveText(stdout, signingSecret)),
+      stderr: truncateCommandOutput(sanitizeSensitiveText(stderr, signingSecret))
+    };
+  } catch (error) {
+    throw new Error(`Restart command failed: ${sanitizeErrorMessage(error, signingSecret)}`);
+  }
+}
+function sanitizeErrorMessage(error, signingSecret) {
+  return sanitizeSensitiveText(error instanceof Error ? error.message : String(error), signingSecret);
+}
+function sanitizeSensitiveText(value, signingSecret) {
+  let sanitized = value;
+  if (signingSecret) {
+    sanitized = sanitized.split(signingSecret).join("[masked-webhook-secret]");
+  }
+  return sanitized.replace(/\bwhsec_[A-Za-z0-9_-]{8,}\b/g, "[masked-webhook-secret]").replace(/\bsk_(?:(?:test|live|uat|prod)_)?[A-Za-z0-9_-]{8,}\b/g, "[masked-secret-key]");
 }
 function truncateCommandOutput(value) {
   if (!value) return void 0;
@@ -6126,7 +6708,7 @@ function escapeRegExp(value) {
 function maskWebhookSecrets(value, showSecret) {
   if (showSecret) return value;
   if (Array.isArray(value)) return value.map((item) => maskWebhookSecrets(item, false));
-  if (!isRecord(value)) return value;
+  if (!isRecord2(value)) return value;
   const result = {};
   for (const [key, nestedValue] of Object.entries(value)) {
     if (key === "signingSecret" && typeof nestedValue === "string") {
@@ -6137,20 +6719,39 @@ function maskWebhookSecrets(value, showSecret) {
   }
   return result;
 }
-function formatEventResult(result) {
-  const data = getEnvelopeData(result);
-  const events = isRecord(data) && Array.isArray(data.events) ? data.events : [];
-  if (events.length === 0) return formatEventCatalog(WEBHOOK_EVENT_CATALOG);
-  return events.map((event) => {
-    if (!isRecord(event)) return String(event);
-    return [event.name, event.code, event.description].filter(Boolean).join("	");
-  }).join("\n");
-}
 function formatEventCatalog(events) {
-  return events.map((event) => [event.name, event.code, event.description].join("	")).join("\n");
+  return events.map((event) => [event.name, event.code, event.description].filter((value) => value !== void 0).join("	")).join("\n");
+}
+function formatPresetCatalog(presets) {
+  return Object.entries(presets).map(([name, value]) => Array.isArray(value) ? `${name}	${value.length}	${value.join(", ")}` : `${name}	unavailable	${value.unavailable}`).join("\n");
+}
+function formatEventSelection(selection) {
+  return [
+    `Resolved events (${selection.resolvedEvents.length}): ${selection.resolvedEvents.join(", ")}`,
+    ...Object.entries(selection.presetExpansions).map(
+      ([name, events]) => `Preset ${name} expands to ${events.length}: ${events.join(", ")}`
+    ),
+    ...selection.warnings.map((warning) => `Warning: ${warning}`)
+  ].join("\n");
+}
+function formatEventDiff(diff) {
+  return [
+    `Added (${diff.added.length}): ${diff.added.join(", ") || "(none)"}.`,
+    `Removed (${diff.removed.length}): ${diff.removed.join(", ") || "(none)"}.`,
+    `Unchanged (${diff.unchanged.length}): ${diff.unchanged.join(", ") || "(none)"}.`
+  ].join(" ");
+}
+function formatEnsureEventBehavior(operation) {
+  if (operation === "replace") {
+    return "Ensure event behavior: explicit replace (--allow-remove-events authorized removal of events outside the resolved selection).";
+  }
+  if (operation === "merge") {
+    return "Ensure event behavior: safe merge (existing events are preserved and resolved events are added).";
+  }
+  return "Ensure event behavior: create (the new endpoint receives the resolved event set).";
 }
 function formatEndpointList(result) {
-  const rows = result.rows ?? [];
+  const rows = extractEndpointRows(result);
   if (rows.length === 0) return "No webhook endpoints found.";
   return rows.map((endpoint) => formatEndpointLine(endpoint)).join("\n");
 }
@@ -6181,7 +6782,7 @@ function formatSigningSecretLine(endpoint, showSecret) {
   }
   return void 0;
 }
-function isRecord(value) {
+function isRecord2(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -6938,150 +7539,194 @@ function normalizeWebhookEventSet(value) {
 }
 
 // src/webhook/fixtures.ts
-var FIXTURE_EVENT_CREATED = "2025-01-15T12:00:00.000Z";
+var WEBHOOK_FIXTURE_PROFILES = ["merchant-webhook", "legacy"];
+var DEFAULT_WEBHOOK_FIXTURE_PROFILE = "merchant-webhook";
+var WEBHOOK_FIXTURE_TYPES = [...WEBHOOK_COMMERCE_EVENTS];
+var FIXTURE_EVENT_CREATED = Date.parse("2025-01-15T12:00:00.000Z");
 var CHECKOUT_CREATED_AT = "2025-01-15T11:45:00.000Z";
 var CHECKOUT_EXPIRES_AT = "2025-01-15T12:45:00.000Z";
-var CHECKOUT_EXPIRED_AT = "2025-01-15T12:45:00.000Z";
-var ORDER_CREATED_AT = "2025-01-15T11:50:00.000Z";
-var ORDER_PAID_AT = "2025-01-15T11:55:00.000Z";
-var ORDER_CREATED_TIME = Date.parse(ORDER_CREATED_AT);
-var ORDER_PAYMENT_TIME = Date.parse(ORDER_PAID_AT);
-var SUBSCRIPTION_CREATED_AT = "2025-01-15T11:56:00.000Z";
-var SUBSCRIPTION_ACTIVATED_AT = "2025-01-15T11:57:00.000Z";
-var CURRENT_PERIOD_START = "2025-01-15T00:00:00.000Z";
-var CURRENT_PERIOD_END = "2025-02-15T00:00:00.000Z";
-var INVOICE_CREATED_AT = "2025-01-15T11:58:00.000Z";
-var INVOICE_DUE_AT = "2025-01-22T00:00:00.000Z";
-var INVOICE_PAID_AT = "2025-01-15T12:00:00.000Z";
-var INVOICE_VOIDED_AT = "2025-01-16T12:00:00.000Z";
-function createWebhookFixture(type, overrides = {}) {
-  const event = {
-    id: fixtureEventId(type),
+var ORDER_PAYMENT_TIME = Date.parse("2025-01-15T11:55:00.000Z");
+var SUBSCRIPTION_CREATED_AT = Date.parse("2025-01-15T11:56:00.000Z");
+var CURRENT_PERIOD_START = Date.parse("2025-01-15T00:00:00.000Z");
+var CURRENT_PERIOD_END = Date.parse("2025-02-15T00:00:00.000Z");
+var NEXT_PERIOD_START = CURRENT_PERIOD_END;
+var NEXT_PERIOD_END = Date.parse("2025-03-15T00:00:00.000Z");
+var TRIAL_START = Date.parse("2025-01-15T11:57:00.000Z");
+var TRIAL_END = Date.parse("2025-01-22T11:57:00.000Z");
+var CANCELLED_AT = Date.parse("2025-02-16T12:00:00.000Z");
+var INVOICE_CREATED_AT = Date.parse("2025-01-15T11:58:00.000Z");
+var REFUND_CREATED_AT = Date.parse("2025-01-16T09:30:00.000Z");
+var DISPUTE_EVIDENCE_DEADLINE = Date.parse("2025-01-30T12:00:00.000Z");
+var DISPUTE_CHANNEL_TIME = Date.parse("2025-01-16T09:00:00.000Z");
+function createWebhookFixture(type, options = {}) {
+  const fixtureType = assertFixtureType(type);
+  const profile = options.profile ?? DEFAULT_WEBHOOK_FIXTURE_PROFILE;
+  if (!WEBHOOK_FIXTURE_PROFILES.includes(profile)) {
+    throw new Error(`Unsupported webhook fixture profile "${profile}". Use one of: ${WEBHOOK_FIXTURE_PROFILES.join(", ")}.`);
+  }
+  const resource = fixtureBuilders[fixtureType]();
+  const event = profile === "legacy" ? createLegacyEnvelope(fixtureType, resource) : createMerchantWebhookEnvelope(fixtureType, resource);
+  return {
+    ...event,
+    ...options.overrides
+  };
+}
+function isDeprecatedWebhookFixtureProfile(profile) {
+  return profile === "legacy";
+}
+function createMerchantWebhookEnvelope(type, resource) {
+  return {
+    id: fixtureEventId(type, "event"),
     object: "event",
     created: FIXTURE_EVENT_CREATED,
+    type,
+    data: {
+      object: resource
+    }
+  };
+}
+function createLegacyEnvelope(type, resource) {
+  const legacyResource = toLegacyResource(resource);
+  const resourceObject = typeof legacyResource.object === "string" ? legacyResource.object : resourceObjectForType(type);
+  delete legacyResource.object;
+  return {
+    id: fixtureEventId(type, "evt"),
+    object: "event",
+    created: new Date(FIXTURE_EVENT_CREATED).toISOString(),
     livemode: false,
     type,
-    data: defaultDataForType(type),
-    ...overrides
-  };
-  return event;
-}
-function defaultDataForType(type) {
-  const builder = fixtureBuilders[type];
-  if (builder) return builder();
-  return {
-    note: "Generated by clink-integ-cli local webhook simulation"
+    data: {
+      object: resourceObject,
+      ...legacyResource
+    }
   };
 }
 var fixtureBuilders = {
   "session.complete": () => sessionFixture({
     status: "completed",
     paymentStatus: "paid",
-    orderId: "ord_test_123",
     expiresAt: CHECKOUT_EXPIRES_AT
   }),
   "session.expired": () => sessionFixture({
     status: "expired",
     paymentStatus: "unpaid",
-    orderId: null,
-    expiresAt: CHECKOUT_EXPIRED_AT
+    expiresAt: CHECKOUT_EXPIRES_AT
   }),
   "order.created": () => orderFixture({
-    status: "pending",
+    status: "created",
     paymentTime: null,
-    paymentExecutionDetails: []
+    paymentExecutionDetails: null,
+    riskLevel: null
+  }),
+  "order.next_action": () => orderFixture({
+    status: "requires_action",
+    paymentTime: null,
+    paymentExecutionDetails: null,
+    riskLevel: null
   }),
   "order.succeeded": () => orderFixture({
     status: "success",
     paymentTime: ORDER_PAYMENT_TIME,
-    paymentExecutionDetails: []
+    paymentExecutionDetails: null,
+    riskLevel: "LOW"
   }),
   "order.failed": () => orderFixture({
     status: "failed",
     paymentTime: ORDER_PAYMENT_TIME,
-    paymentExecutionDetails: [
-      {
-        channelCode: "CARD",
-        originalFailureCode: "card_declined",
-        originalFailureMessage: "The payment method was declined in the local fixture."
-      }
-    ]
+    invoiceId: null,
+    paymentExecutionDetails: null,
+    failureCode: "processor_communication_error",
+    failureMessage: "The payment processor is temporarily unavailable in this local fixture.",
+    riskLevel: "LOW"
+  }),
+  "refund.created": () => refundFixture({ status: "created" }),
+  "refund.succeeded": () => refundFixture({ status: "success" }),
+  "refund.failed": () => refundFixture({
+    status: "failed",
+    failureCode: "already_refunded",
+    failureMessage: "The local fixture order has already been refunded."
   }),
   "subscription.created": () => subscriptionFixture({
-    status: "created",
-    activatedAt: null,
-    pastDueSince: null
+    status: "incomplete",
+    recurringInvoiceItem: null,
+    upcomingInvoiceItem: recurringInvoiceItem()
   }),
-  "subscription.activated": () => subscriptionFixture({
-    status: "activated",
-    activatedAt: SUBSCRIPTION_ACTIVATED_AT,
-    pastDueSince: null
+  "subscription.trialing": () => subscriptionFixture({ status: "free_trial", trialStart: TRIAL_START, trialEnd: TRIAL_END }),
+  "subscription.activated": () => subscriptionFixture({ status: "active" }),
+  "subscription.incomplete_expired": () => subscriptionFixture({
+    status: "incomplete_expired",
+    recurringInvoiceItem: null,
+    upcomingInvoiceItem: recurringInvoiceItem()
   }),
   "subscription.past_due": () => subscriptionFixture({
     status: "past_due",
-    activatedAt: SUBSCRIPTION_ACTIVATED_AT,
-    pastDueSince: "2025-02-16T00:00:00.000Z"
+    upcomingInvoiceItem: recurringInvoiceItem(),
+    elapsedCycles: 1
   }),
-  "invoice.open": () => invoiceFixture({
-    status: "open",
-    amountDue: 1999,
-    amountPaid: 0,
-    paidAt: null,
-    voidedAt: null
+  "subscription.cancelled": () => subscriptionFixture({
+    status: "cancelled",
+    cancelAt: CANCELLED_AT,
+    cancelAtPeriodEnd: false,
+    canceledAt: CANCELLED_AT,
+    cancelReason: "requested_by_customer",
+    elapsedCycles: 1
   }),
-  "invoice.paid": () => invoiceFixture({
-    status: "paid",
-    amountDue: 1999,
-    amountPaid: 1999,
-    paidAt: INVOICE_PAID_AT,
-    voidedAt: null
-  }),
-  "invoice.void": () => invoiceFixture({
-    status: "void",
-    amountDue: 1999,
-    amountPaid: 0,
-    paidAt: null,
-    voidedAt: INVOICE_VOIDED_AT
-  })
+  "subscription.updated.plan_changed": () => subscriptionFixture({ status: "active", priceId: "price_test_456", priceSnapshotId: "pricesns_test_456" }),
+  "subscription.updated.plan_change_canceled": () => subscriptionFixture({ status: "active" }),
+  "subscription.updated.renewed": () => subscriptionFixture({ status: "active", currentPeriodStart: NEXT_PERIOD_START, currentPeriodEnd: NEXT_PERIOD_END, elapsedCycles: 1 }),
+  "subscription.updated.cancel_at_period_end_set": () => subscriptionFixture({ status: "active", cancelAtPeriodEnd: true, cancelAt: CURRENT_PERIOD_END }),
+  "subscription.updated.cancel_at_period_end_revoked": () => subscriptionFixture({ status: "active", cancelAtPeriodEnd: false, cancelAt: null }),
+  "invoice.open": () => invoiceFixture({ status: "open", paymentAmount: "19.99", orderId: null }),
+  "invoice.paid": () => invoiceFixture({ status: "paid", paymentAmount: "19.99", orderId: "order_test_123" }),
+  "invoice.void": () => invoiceFixture({ status: "void", paymentAmount: "0.00", orderId: "order_test_123" }),
+  "dispute.created": () => disputeFixture(1),
+  "dispute.updated": () => disputeFixture(2),
+  "dispute.won": () => disputeFixture(3),
+  "dispute.lost": () => disputeFixture(4),
+  "dispute.closed": () => disputeFixture(5),
+  "payment_method.added": () => paymentMethodFixture(),
+  "payment_method.default_change": () => paymentMethodFixture(),
+  "payment_method.update": () => paymentMethodFixture({ visaRegistrationSucceeded: true })
 };
-function fixtureEventId(type) {
-  return `evt_${type.replace(/[^a-z0-9]+/gi, "_")}_test`;
+function assertFixtureType(type) {
+  if (WEBHOOK_FIXTURE_TYPES.includes(type)) return type;
+  throw new Error(`Unsupported webhook fixture type "${type}". Supported types: ${WEBHOOK_FIXTURE_TYPES.join(", ")}.`);
 }
-function baseCustomer() {
+function fixtureEventId(type, prefix) {
+  return `${prefix}_${type.replace(/[^a-z0-9]+/gi, "_")}_test`;
+}
+function recurringInvoiceItem(options = {}) {
   return {
-    customerId: "cus_test_123",
-    email: "test@example.com",
-    name: "Test Customer"
-  };
-}
-function baseLineItems() {
-  return [
-    {
+    invoiceItemId: "ii_test_123",
+    amount: "19.99",
+    discountAmount: null,
+    paymentAmount: "19.99",
+    couponTerms: null,
+    promotionCode: null,
+    description: "Local webhook test plan",
+    currency: "USD",
+    periodStart: CURRENT_PERIOD_START,
+    periodEnd: CURRENT_PERIOD_END,
+    proration: null,
+    price: {
       productId: "prd_test_123",
-      priceId: "price_test_123",
-      description: "Local webhook test plan",
+      productName: "Local webhook test plan",
+      priceId: options.priceId ?? "price_test_123",
+      priceSnapshotId: options.priceSnapshotId ?? "pricesns_test_123",
+      unitAmount: "19.99",
       quantity: 1,
-      unitAmount: 1999,
-      amountTotal: 1999
+      recurring: {
+        interval: "month",
+        intervalCount: null,
+        pricingModel: "flat_rate",
+        tiersMode: null,
+        trialPeriodDays: 0
+      }
     }
-  ];
-}
-function basePriceDataList() {
-  return [
-    {
-      name: "Local webhook test plan",
-      quantity: 1,
-      unitAmount: 1999,
-      currency: "USD",
-      imageUrl: "https://merchant.example/assets/local-webhook-test.png"
-    }
-  ];
-}
-function baseMetadata() {
-  return {
-    environment: "local",
-    source: "clink-integ-cli"
   };
+}
+function invoiceItems() {
+  return [recurringInvoiceItem()];
 }
 function sessionFixture(values) {
   return {
@@ -7090,94 +7735,203 @@ function sessionFixture(values) {
     status: values.status,
     paymentStatus: values.paymentStatus,
     originalCurrency: "USD",
-    paymentCurrency: "USD",
-    amountSubtotal: 1999,
-    amountTotal: 1999,
+    paymentCurrency: null,
+    amountSubtotal: 19.99,
+    amountTotal: null,
     subscriptionId: null,
     invoiceId: null,
-    orderId: values.orderId,
-    merchantReferenceId: "order_test_123",
-    customer: baseCustomer(),
-    locale: "en-US",
+    orderId: null,
+    merchantReferenceId: "merchant_order_test_123",
+    customer: null,
+    locale: null,
     uiMode: "hostedPage",
     returnUrl: null,
     successUrl: "https://merchant.example/success",
     cancelUrl: "https://merchant.example/cancel",
     created: CHECKOUT_CREATED_AT,
     expire: values.expiresAt,
-    product: {
-      productId: "prd_test_123",
-      productName: "Local webhook test plan"
+    product: null,
+    price: {
+      priceId: null,
+      priceList: null,
+      recurring: null
     },
-    priceDataList: basePriceDataList(),
-    metadata: baseMetadata()
+    priceDataList: null,
+    showPromotionCode: false,
+    metadata: {}
   };
 }
 function orderFixture(values) {
   return {
-    orderId: "ord_test_123",
-    type: "onetime",
+    orderId: "order_test_123",
+    type: "recurring",
     status: values.status,
-    merchantReferenceId: "order_test_123",
+    merchantReferenceId: "merchant_order_test_123",
     sessionId: "sess_test_123",
+    invoiceId: values.invoiceId === void 0 ? "inv_test_123" : values.invoiceId,
     customerId: "cus_test_123",
     customerEmail: "test@example.com",
-    createTime: ORDER_CREATED_TIME,
     productId: "prd_test_123",
     priceId: "price_test_123",
-    priceDataList: basePriceDataList(),
+    priceDataList: null,
     paymentMethod: {
       paymentMethodType: "CARD",
-      paymentInstrumentId: "pi_test_123"
+      paymentInstrumentId: "pi_test_123",
+      cardLastFour: "4242",
+      cardScheme: "VISA",
+      issuerBank: "Test Bank",
+      issuerRegion: "US",
+      wallet: null
     },
     paymentExecutionDetails: values.paymentExecutionDetails,
-    amountSubtotal: 1999,
-    amountTotal: 1999,
+    amountSubtotal: 19.99,
+    amountTotal: 19.99,
     paymentCurrency: "USD",
     originalCurrency: "USD",
+    ...values.failureCode === void 0 ? {} : { failureCode: values.failureCode },
+    ...values.failureMessage === void 0 ? {} : { failureMessage: values.failureMessage },
     paymentTime: values.paymentTime,
-    metadata: baseMetadata(),
-    riskLevel: "low"
+    metadata: {},
+    riskLevel: values.riskLevel
   };
 }
 function subscriptionFixture(values) {
+  const priceId = values.priceId ?? "price_test_123";
+  const priceSnapshotId = values.priceSnapshotId ?? "pricesns_test_123";
   return {
-    object: "subscription",
+    merchantReference: "merchant_subscription_test_123",
     subscriptionId: "sub_test_123",
-    status: values.status,
-    productId: "prd_test_123",
-    priceId: "price_test_123",
+    sessionId: "sess_test_123",
     customerId: "cus_test_123",
-    customer: baseCustomer(),
-    currentPeriodStart: CURRENT_PERIOD_START,
-    currentPeriodEnd: CURRENT_PERIOD_END,
-    cancelAtPeriodEnd: false,
-    latestInvoiceId: "inv_test_123",
-    createdAt: SUBSCRIPTION_CREATED_AT,
-    activatedAt: values.activatedAt,
-    pastDueSince: values.pastDueSince,
-    metadata: baseMetadata()
+    productId: "prd_test_123",
+    priceId,
+    priceSnapshotId,
+    createTime: SUBSCRIPTION_CREATED_AT,
+    quantity: 1,
+    paymentMethodType: "CARD",
+    paymentInstrumentId: "pi_test_123",
+    trialStart: values.trialStart ?? null,
+    trialEnd: values.trialEnd ?? null,
+    currentPeriodStart: values.currentPeriodStart ?? CURRENT_PERIOD_START,
+    currentPeriodEnd: values.currentPeriodEnd ?? CURRENT_PERIOD_END,
+    cancelAt: values.cancelAt ?? null,
+    cancelAtPeriodEnd: values.cancelAtPeriodEnd ?? null,
+    canceledAt: values.canceledAt ?? null,
+    cancelReason: values.cancelReason ?? null,
+    status: values.status,
+    billing: "charge_automatically",
+    currency: "USD",
+    recurringInvoiceItem: values.recurringInvoiceItem === void 0 ? recurringInvoiceItem({ priceId, priceSnapshotId }) : values.recurringInvoiceItem,
+    upcomingInvoiceItem: values.upcomingInvoiceItem ?? null,
+    scheduledPhases: null,
+    elapsedCycles: values.elapsedCycles ?? null,
+    metadata: null
   };
 }
 function invoiceFixture(values) {
   return {
-    object: "invoice",
     invoiceId: "inv_test_123",
-    status: values.status,
     subscriptionId: "sub_test_123",
+    merchantReference: "merchant_subscription_test_123",
+    orderId: values.orderId,
     customerId: "cus_test_123",
-    customer: baseCustomer(),
-    amountDue: values.amountDue,
-    amountPaid: values.amountPaid,
-    currency: "USD",
-    dueAt: INVOICE_DUE_AT,
-    hostedInvoiceUrl: "https://merchant.example/invoices/inv_test_123",
-    lineItems: baseLineItems(),
-    createdAt: INVOICE_CREATED_AT,
-    paidAt: values.paidAt,
-    voidedAt: values.voidedAt,
-    metadata: baseMetadata()
+    merchantId: "mcht_test_123",
+    status: values.status,
+    createTime: INVOICE_CREATED_AT,
+    currentPeriodStart: CURRENT_PERIOD_START,
+    currentPeriodEnd: CURRENT_PERIOD_END,
+    originalAmount: "19.99",
+    paymentAmount: values.paymentAmount,
+    originalCurrency: "USD",
+    billing: "charge_automatically",
+    items: invoiceItems(),
+    discount: null,
+    metadata: null
   };
+}
+function refundFixture(values) {
+  return {
+    createTime: REFUND_CREATED_AT,
+    refundId: "rfd_test_123",
+    refundMerchantOrderId: "merchant_refund_test_123",
+    orderId: "order_test_123",
+    customerId: "cus_test_123",
+    refundAmount: 19.99,
+    refundCurrency: "USD",
+    status: values.status,
+    refundReason: "Customer Initiated Refund",
+    paymentInstrumentId: "pi_test_123",
+    metadata: {},
+    ...values.failureCode === void 0 ? {} : { failureCode: values.failureCode },
+    ...values.failureMessage === void 0 ? {} : { failureMessage: values.failureMessage }
+  };
+}
+function disputeFixture(status) {
+  return {
+    chargeBackId: "cbi_test_123",
+    orderId: "order_test_123",
+    merchantReferenceId: "merchant_order_test_123",
+    merchantId: "mcht_test_123",
+    customerId: "cus_test_123",
+    disputeAmount: 19.99,
+    disputeCurrency: "USD",
+    originalAmount: 19.99,
+    originalCurrency: "USD",
+    reasonCode: "10.4",
+    reasonDescription: "fraudulent",
+    status,
+    evidenceDeadline: DISPUTE_EVIDENCE_DEADLINE,
+    channelDisputeTime: DISPUTE_CHANNEL_TIME,
+    networkReasonCode: "10.4"
+  };
+}
+function paymentMethodFixture(values = {}) {
+  return {
+    id: "pi_test_123",
+    customerId: "cus_test_123",
+    type: "CARD",
+    card: {
+      last4: "4242",
+      name: "Test User",
+      expiryYear: "2030",
+      expiryMonth: "12",
+      scheme: "visa",
+      funding: "credit",
+      issuerRegion: "US",
+      issuerBank: "Test Bank",
+      billingAddress: null
+    },
+    wallet: null,
+    created: FIXTURE_EVENT_CREATED,
+    ...values.visaRegistrationSucceeded === void 0 ? {} : { visaRegistrationSucceeded: values.visaRegistrationSucceeded }
+  };
+}
+function resourceObjectForType(type) {
+  if (type.startsWith("session.")) return "checkout.session";
+  return type.split(".")[0];
+}
+function toLegacyResource(resource) {
+  const legacy = structuredClone(resource);
+  if (Array.isArray(legacy.items)) {
+    legacy.lineItems = legacy.items;
+    delete legacy.items;
+  }
+  for (const field of [
+    "createTime",
+    "trialStart",
+    "trialEnd",
+    "currentPeriodStart",
+    "currentPeriodEnd",
+    "cancelAt",
+    "canceledAt",
+    "evidenceDeadline",
+    "channelDisputeTime"
+  ]) {
+    if (typeof legacy[field] === "number") {
+      legacy[field] = new Date(legacy[field]).toISOString();
+    }
+  }
+  return legacy;
 }
 
 // src/webhook/signature.ts
@@ -7395,8 +8149,8 @@ function validateUrl(option, value) {
 }
 
 // src/commands/init.ts
-import { mkdir as mkdir4, writeFile as writeFile4 } from "node:fs/promises";
-import { dirname as dirname5, join as join2 } from "node:path";
+import { mkdir as mkdir3, writeFile as writeFile3 } from "node:fs/promises";
+import { dirname as dirname4, join as join3 } from "node:path";
 
 // src/starters.ts
 var supportedFrameworks = ["generic", "nextjs", "express", "fastapi"];
@@ -7409,6 +8163,40 @@ var frameworkAliases = {
   fastapi: "fastapi",
   "fast-api": "fastapi"
 };
+var starterWebhookEvents = [
+  "session.complete",
+  "session.expired",
+  "order.created",
+  "order.succeeded",
+  "order.failed",
+  "order.next_action",
+  "refund.created",
+  "refund.succeeded",
+  "refund.failed",
+  "subscription.created",
+  "subscription.trialing",
+  "subscription.activated",
+  "subscription.incomplete_expired",
+  "subscription.past_due",
+  "subscription.cancelled",
+  "subscription.updated.plan_changed",
+  "subscription.updated.plan_change_canceled",
+  "subscription.updated.renewed",
+  "subscription.updated.cancel_at_period_end_set",
+  "subscription.updated.cancel_at_period_end_revoked",
+  "invoice.open",
+  "invoice.paid",
+  "invoice.void",
+  "dispute.created",
+  "dispute.updated",
+  "dispute.won",
+  "dispute.lost",
+  "dispute.closed",
+  "payment_method.added",
+  "payment_method.default_change",
+  "payment_method.update",
+  "payment_method.deleted"
+];
 function createFrameworkStarter(frameworkName) {
   const framework = normalizeFramework(frameworkName);
   switch (framework) {
@@ -7611,6 +8399,19 @@ function envExample(appUrl, port) {
     "CLINK_BASE_URL=https://uat-api.clinkbill.com/api/",
     "CLINK_SECRET_KEY=",
     "CLINK_WEBHOOK_SIGNING_KEY=",
+    "CLINK_STARTER_PRICE_KEY=starter-monthly",
+    "CLINK_STARTER_PRICE_MODE=registered",
+    "CLINK_STARTER_UNIT_AMOUNT=",
+    "CLINK_STARTER_CURRENCY=USD",
+    "CLINK_STARTER_ALLOW_QUANTITY=false",
+    "CLINK_STARTER_PRODUCT_NAME=",
+    "CLINK_STARTER_PRODUCT_IMAGE_URL=",
+    "CLINK_STARTER_PRODUCT_ID=",
+    "CLINK_STARTER_PRICE_ID=",
+    "CLINK_STARTER_PLAN_KEY=testPlan",
+    "CLINK_STARTER_SUBSCRIPTION_PRODUCT_ID=",
+    "CLINK_STARTER_SUBSCRIPTION_PRICE_ID=",
+    "CLINK_STARTER_SUBSCRIPTION_CURRENCY=USD",
     `APP_URL=${appUrl}`,
     `PORT=${port}`
   ]);
@@ -7637,9 +8438,9 @@ function starterReadme(options) {
     "",
     "## Endpoints",
     "",
-    "- `POST " + options.endpointBase + "/checkout` creates a hosted checkout session.",
-    "- `POST " + options.endpointBase + "/subscription` creates a subscription.",
-    "- `POST " + options.endpointBase + "/webhook` verifies `X-Clink-Timestamp` and `X-Clink-Signature` against the raw body.",
+    "- `POST " + options.endpointBase + "/checkout` accepts a server-approved `priceKey` and creates a hosted checkout session.",
+    "- `POST " + options.endpointBase + "/subscription` accepts a server-approved `planKey` and creates a subscription.",
+    "- `POST " + options.endpointBase + "/webhook` verifies `X-Clink-Timestamp` and `X-Clink-Signature` against the raw body before parsing, normalizing, and dispatching the event.",
     "",
     "## Curl Examples",
     "",
@@ -7649,6 +8450,13 @@ function starterReadme(options) {
     "",
     "## Notes",
     "",
+    "- Canonical merchant webhooks keep the complete resource in `data.object`.",
+    "- Legacy payloads with a string `data.object` are normalized after signature verification and emit a structured warning metric.",
+    "- Checkout prices, currencies, registered product IDs, and redirect URLs come from server-owned configuration. Configure the example `starter-monthly` registered Price before use; inline items are explicit opt-in and never default to a synthetic public-route price.",
+    "- Client-selected quantity is disabled by default. Set `CLINK_STARTER_ALLOW_QUANTITY=true` only for an inline SKU that explicitly supports 1-10 units, and replace the example environment-backed catalog with your database, CMS, or product service before production.",
+    "- The demo generates `merchantReferenceId` on the server. In production, create and persist the merchant order first, then reuse that trusted order ID for reconciliation; it is not an idempotency key.",
+    "- The 300-second webhook timestamp window rejects stale signatures, but it is not delivery deduplication. Persist every `event.id` in a durable Inbox with a unique constraint before applying business side effects.",
+    "- Unrecognized payloads and event types throw and return non-2xx so Clink can retry; connect this path to your durable webhook Inbox before production.",
     ...options.notes.map((note) => `- ${note}`)
   ]);
 }
@@ -7670,7 +8478,15 @@ function integrationDoc(options) {
     'X-Clink-Timestamp + "." + raw request body',
     "```",
     "",
-    "Verify the HMAC SHA-256 hex digest with `CLINK_WEBHOOK_SIGNING_KEY` before parsing JSON.",
+    "Verify the HMAC SHA-256 hex digest with `CLINK_WEBHOOK_SIGNING_KEY` and reject timestamps outside the 300-second freshness window before parsing JSON.",
+    "Only after verification should the handler call JSON parsing and normalize legacy payloads. Unknown payloads or event types must return non-2xx and enter the application's Inbox/retry path.",
+    "The freshness window does not replace idempotency: durably claim each `event.id` before applying side effects so valid retries cannot be processed twice.",
+    "",
+    "For a complete commerce integration, register the endpoint with the runtime-validated commerce preset:",
+    "",
+    "```bash",
+    `clink webhook endpoint ensure --url https://YOUR_PUBLIC_HOST${options.endpointBase}/webhook --events commerce --save-secret --json`,
+    "```",
     "",
     "## Local Checks",
     "",
@@ -7699,13 +8515,13 @@ function curlExamples(appUrl, endpointBase) {
     "",
     'curl -X POST "$APP_URL' + endpointBase + '/checkout" \\',
     '  -H "Content-Type: application/json" \\',
-    `  -d '{"customerEmail":"buyer@example.com","amount":19.99,"currency":"USD","name":"Starter Plan","successUrl":"http://localhost:3000/success","cancelUrl":"http://localhost:3000/cancel"}'`,
+    `  -d '{"customerEmail":"buyer@example.com","priceKey":"starter-monthly"}'`,
     "",
     'curl -X POST "$APP_URL' + endpointBase + '/subscription" \\',
     '  -H "Content-Type: application/json" \\',
-    `  -d '{"customerEmail":"buyer@example.com","productId":"prd_test","priceId":"price_test","paymentInstrumentId":"pi_test","paymentMethodType":"CARD","paymentCurrency":"USD","returnUrl":"http://localhost:3000/account"}'`,
+    `  -d '{"customerEmail":"buyer@example.com","planKey":"testPlan","paymentInstrumentId":"pi_test"}'`,
     "",
-    `RAW_BODY='{"type":"order.succeeded","data":{"id":"ord_test"}}'`,
+    `RAW_BODY='{"id":"event_order_succeeded_test","object":"event","created":1700000000000,"type":"order.succeeded","data":{"object":{"orderId":"order_test","status":"success"}}}'`,
     'TIMESTAMP="$(date +%s000)"',
     ': "${CLINK_WEBHOOK_SIGNING_KEY:?Set CLINK_WEBHOOK_SIGNING_KEY before running the webhook curl example}"',
     `SIGNATURE="$(printf '%s.%s' "$TIMESTAMP" "$RAW_BODY" | openssl dgst -sha256 -hmac "$CLINK_WEBHOOK_SIGNING_KEY" -hex | sed 's/^.* //')"`,
@@ -7730,9 +8546,27 @@ function smokeTestScript(appUrl) {
 }
 function nextClinkLibrary() {
   return lines([
-    'import { createHmac, timingSafeEqual } from "node:crypto";',
+    'import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";',
     "",
     'const DEFAULT_BASE_URL = "https://uat-api.clinkbill.com/api/";',
+    "const WEBHOOK_TOLERANCE_MS = 300_000;",
+    'const ALLOWED_CLINK_POST_PATHS = new Set(["checkout/session", "subscription"]);',
+    "const SERVER_CONTROLLED_CHECKOUT_FIELDS = new Set([",
+    '  "amount", "originalAmount", "currency", "originalCurrency", "unitAmount", "priceDataList",',
+    '  "productId", "priceId", "name", "imageUrl", "merchantReferenceId", "successUrl", "cancelUrl", "returnUrl", "redirectUrl",',
+    '  "paymentMethodType", "allowPromotionCodes", "uiMode",',
+    "]);",
+    "const SERVER_CONTROLLED_SUBSCRIPTION_FIELDS = new Set([",
+    '  "productId", "priceId", "merchantReferenceId", "paymentMethodType", "paymentCurrency",',
+    '  "returnUrl", "metadata",',
+    "]);",
+    "",
+    "export class StarterRequestError extends Error {}",
+    "",
+    "export function starterHttpError(error: unknown): { status: number; message: string } {",
+    "  if (error instanceof StarterRequestError) return { status: 400, message: error.message };",
+    '  return { status: 500, message: "Clink starter request failed" };',
+    "}",
     "",
     "export function requireEnv(name: string): string {",
     "  const value = process.env[name];",
@@ -7745,7 +8579,19 @@ function nextClinkLibrary() {
     "export function clinkApiUrl(path: string): string {",
     "  const baseUrl = process.env.CLINK_BASE_URL ?? DEFAULT_BASE_URL;",
     '  const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;',
-    '  return new URL(path.replace(/^\\/+/, ""), normalizedBaseUrl).toString();',
+    "  const base = new URL(normalizedBaseUrl);",
+    '  if (path.includes("\\\\") || path.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(path)) {',
+    '    throw new Error("Clink API path must be an internal relative path");',
+    "  }",
+    '  const relativePath = path.replace(/^\\/+/, "");',
+    "  if (!ALLOWED_CLINK_POST_PATHS.has(relativePath)) {",
+    '    throw new Error("Clink API path is not allowed by this starter");',
+    "  }",
+    "  const resolved = new URL(relativePath, base);",
+    "  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {",
+    '    throw new Error("Clink API path escaped the configured API base");',
+    "  }",
+    "  return resolved.toString();",
     "}",
     "",
     "export async function postClink(path: string, body: unknown): Promise<unknown> {",
@@ -7770,38 +8616,87 @@ function nextClinkLibrary() {
     "  return data;",
     "}",
     "",
-    "export function verifyClinkWebhook(secret: string, timestamp: string, rawBody: string, signature: string): boolean {",
+    "export function verifyClinkWebhook(secret: string, timestamp: string, rawBody: string, signature: string, nowMs = Date.now()): boolean {",
+    "  const timestampMs = parseWebhookTimestampMs(timestamp);",
+    "  if (timestampMs === undefined || !Number.isSafeInteger(nowMs) || Math.abs(nowMs - timestampMs) > WEBHOOK_TOLERANCE_MS) {",
+    "    return false;",
+    "  }",
     '  const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");',
     "  return safeCompare(expected, signature);",
     "}",
     "",
+    "export interface NormalizedClinkWebhookEvent {",
+    "  id: string;",
+    '  object: "event";',
+    "  created: number;",
+    "  type: string;",
+    "  data: { object: Record<string, unknown> };",
+    "}",
+    "",
+    `const SUPPORTED_CLINK_WEBHOOK_EVENTS = new Set<string>(${JSON.stringify(starterWebhookEvents)});`,
+    "",
+    "export function normalizeClinkWebhook(payload: unknown): NormalizedClinkWebhookEvent {",
+    '  if (!isRecord(payload)) throw new Error("Unrecognized Clink webhook payload: expected a JSON object");',
+    '  const id = requireEventString(payload.id, "event.id");',
+    '  const type = requireEventString(payload.type, "event.type");',
+    '  if (payload.object !== "event" || !isRecord(payload.data)) {',
+    "    throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: invalid event envelope`);",
+    "  }",
+    "",
+    "  const created = normalizeEventCreated(payload.created, id, type);",
+    "  if (isRecord(payload.data.object)) {",
+    '    return { id, object: "event", created, type, data: { object: payload.data.object } };',
+    "  }",
+    "",
+    '  if (typeof payload.data.object === "string") {',
+    '    const resource = Object.fromEntries(Object.entries(payload.data).filter(([key]) => key !== "object"));',
+    "    if (Array.isArray(resource.lineItems) && resource.items === undefined) {",
+    "      resource.items = resource.lineItems;",
+    "      delete resource.lineItems;",
+    "    }",
+    '    console.warn(JSON.stringify({ level: "warn", metric: "clink_webhook_legacy_payload_total", value: 1, eventId: id, eventType: type }));',
+    '    return { id, object: "event", created, type, data: { object: resource } };',
+    "  }",
+    "",
+    "  throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: data.object must be an object or legacy string`);",
+    "}",
+    "",
+    "export function dispatchClinkWebhookEvent(event: NormalizedClinkWebhookEvent): void {",
+    "  if (!SUPPORTED_CLINK_WEBHOOK_EVENTS.has(event.type)) {",
+    '    console.error(JSON.stringify({ level: "error", code: "clink_webhook_unknown_event", eventId: event.id, eventType: event.type, retry: true }));',
+    "    throw new Error(`Unsupported Clink webhook event type: ${event.type}`);",
+    "  }",
+    '  console.log(JSON.stringify({ level: "info", code: "clink_webhook_received", eventId: event.id, eventType: event.type }));',
+    "  // Persist to your idempotent webhook Inbox and dispatch business handlers here.",
+    "}",
+    "",
     "export function buildCheckoutPayload(input: Record<string, unknown>): Record<string, unknown> {",
-    "  const amount = Number(input.amount ?? input.originalAmount ?? 19.99);",
-    '  const currency = String(input.currency ?? input.originalCurrency ?? "USD").toUpperCase();',
+    "  rejectServerControlledFields(input, SERVER_CONTROLLED_CHECKOUT_FIELDS);",
+    "  const price = loadStarterCheckoutPrice(input.priceKey);",
+    '  const quantity = parseStarterQuantity(input.quantity, price.mode === "inline" && price.allowQuantity);',
+    '  const originalAmount = price.mode === "inline" ? roundMoney(price.unitAmount * quantity) : price.unitAmount;',
     "  const body: Record<string, unknown> = {",
-    "    customerEmail: input.customerEmail,",
-    "    originalAmount: amount,",
-    "    originalCurrency: currency,",
-    "    merchantReferenceId: input.merchantReferenceId,",
-    "    successUrl: input.successUrl,",
-    "    cancelUrl: input.cancelUrl,",
-    '    uiMode: input.uiMode ?? "hostedPage",',
-    "    returnUrl: input.returnUrl,",
-    "    paymentMethodType: input.paymentMethodType,",
-    "    allowPromotionCodes: Boolean(input.allowPromotionCodes),",
+    '    customerEmail: optionalInputString(input.customerEmail, "customerEmail"),',
+    "    originalAmount,",
+    "    originalCurrency: price.currency,",
+    "    merchantReferenceId: `starter_checkout_${randomUUID()}` ,",
+    '    successUrl: starterAppUrl("success"),',
+    '    cancelUrl: starterAppUrl("cancel"),',
+    '    uiMode: "hostedPage",',
+    "    allowPromotionCodes: false,",
     "  };",
     "",
-    "  if (input.productId || input.priceId) {",
-    "    body.productId = input.productId;",
-    "    body.priceId = input.priceId;",
+    '  if (price.mode === "registered") {',
+    "    body.productId = price.productId;",
+    "    body.priceId = price.priceId;",
     "  } else {",
     "    body.priceDataList = [",
     "      {",
-    '        name: input.name ?? "Test Product",',
-    "        quantity: Number(input.quantity ?? 1),",
-    "        unitAmount: amount,",
-    "        currency,",
-    "        imageUrl: input.imageUrl,",
+    "        name: price.name,",
+    "        quantity,",
+    "        unitAmount: price.unitAmount,",
+    "        currency: price.currency,",
+    "        imageUrl: price.imageUrl,",
     "      },",
     "    ];",
     "  }",
@@ -7809,19 +8704,26 @@ function nextClinkLibrary() {
     "  return body;",
     "}",
     "",
+    "export async function createCheckoutSession(input: Record<string, unknown>): Promise<unknown> {",
+    "  const payload = buildCheckoutPayload(input);",
+    '  return postClink("/checkout/session", payload);',
+    "}",
+    "",
     "export function buildSubscriptionPayload(input: Record<string, unknown>): Record<string, unknown> {",
+    "  rejectServerControlledFields(input, SERVER_CONTROLLED_SUBSCRIPTION_FIELDS);",
+    '  const planKey = requireInputString(input.planKey, "planKey");',
+    '  if (planKey !== requireEnv("CLINK_STARTER_PLAN_KEY")) throw new StarterRequestError("Unknown subscription planKey");',
     "  return {",
-    "    customerId: input.customerId,",
-    "    customerEmail: input.customerEmail,",
-    "    referenceCustomerId: input.referenceCustomerId,",
-    "    merchantReferenceId: input.merchantReferenceId,",
-    "    productId: input.productId,",
-    "    priceId: input.priceId,",
-    "    paymentInstrumentId: input.paymentInstrumentId,",
-    '    paymentMethodType: input.paymentMethodType ?? "CARD",',
-    '    paymentCurrency: String(input.paymentCurrency ?? "USD").toUpperCase(),',
-    "    returnUrl: input.returnUrl,",
-    "    metadata: input.metadata,",
+    '    customerId: optionalInputString(input.customerId, "customerId"),',
+    '    customerEmail: optionalInputString(input.customerEmail, "customerEmail"),',
+    '    referenceCustomerId: optionalInputString(input.referenceCustomerId, "referenceCustomerId"),',
+    "    merchantReferenceId: `starter_subscription_${randomUUID()}` ,",
+    '    productId: requireEnv("CLINK_STARTER_SUBSCRIPTION_PRODUCT_ID"),',
+    '    priceId: requireEnv("CLINK_STARTER_SUBSCRIPTION_PRICE_ID"),',
+    '    paymentInstrumentId: optionalInputString(input.paymentInstrumentId, "paymentInstrumentId"),',
+    '    paymentMethodType: "CARD",',
+    '    paymentCurrency: parseStarterCurrency(requireEnv("CLINK_STARTER_SUBSCRIPTION_CURRENCY")),',
+    '    returnUrl: starterAppUrl("account"),',
     "  };",
     "}",
     "",
@@ -7838,6 +8740,105 @@ function nextClinkLibrary() {
     "  }",
     "}",
     "",
+    "function parseWebhookTimestampMs(timestamp: string): number | undefined {",
+    "  if (!/^(?:0|[1-9][0-9]*)$/.test(timestamp)) return undefined;",
+    "  const parsed = Number(timestamp);",
+    "  if (!Number.isSafeInteger(parsed)) return undefined;",
+    "  const timestampMs = parsed < 1_000_000_000_000 ? parsed * 1000 : parsed;",
+    "  return Number.isSafeInteger(timestampMs) ? timestampMs : undefined;",
+    "}",
+    "",
+    "function loadStarterCheckoutPrice(value: unknown):",
+    '  | { mode: "inline"; unitAmount: number; currency: string; name: string; imageUrl?: string; allowQuantity: boolean }',
+    '  | { mode: "registered"; unitAmount: number; currency: string; productId: string; priceId: string; allowQuantity: false } {',
+    '  const priceKey = requireInputString(value, "priceKey");',
+    '  if (priceKey !== requireEnv("CLINK_STARTER_PRICE_KEY")) throw new StarterRequestError("Unknown checkout priceKey");',
+    '  const mode = requireEnv("CLINK_STARTER_PRICE_MODE");',
+    '  const unitAmount = parseStarterAmount(requireEnv("CLINK_STARTER_UNIT_AMOUNT"));',
+    '  const currency = parseStarterCurrency(requireEnv("CLINK_STARTER_CURRENCY"));',
+    '  if (mode === "registered") {',
+    '    return { mode, unitAmount, currency, productId: requireEnv("CLINK_STARTER_PRODUCT_ID"), priceId: requireEnv("CLINK_STARTER_PRICE_ID"), allowQuantity: false };',
+    "  }",
+    '  if (mode === "inline") {',
+    '    return { mode, unitAmount, currency, name: requireEnv("CLINK_STARTER_PRODUCT_NAME"), imageUrl: optionalEnv("CLINK_STARTER_PRODUCT_IMAGE_URL"), allowQuantity: parseStarterBoolean(process.env.CLINK_STARTER_ALLOW_QUANTITY, "CLINK_STARTER_ALLOW_QUANTITY") };',
+    "  }",
+    '  throw new Error("CLINK_STARTER_PRICE_MODE must be inline or registered");',
+    "}",
+    "",
+    "function rejectServerControlledFields(input: Record<string, unknown>, fields: Set<string>): void {",
+    "  for (const field of fields) {",
+    "    if (Object.prototype.hasOwnProperty.call(input, field)) throw new StarterRequestError(`Starter request field ${field} is server-controlled`);",
+    "  }",
+    "}",
+    "",
+    "function parseStarterQuantity(value: unknown, allowed: boolean): number {",
+    "  const quantity = value === undefined ? 1 : value;",
+    '  if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 10) throw new StarterRequestError("quantity must be an integer from 1 through 10");',
+    '  if (!allowed && value !== undefined) throw new StarterRequestError("This price does not allow a client-selected quantity");',
+    "  return quantity;",
+    "}",
+    "",
+    "function parseStarterBoolean(value: string | undefined, name: string): boolean {",
+    '  if (value === undefined || value === "false") return false;',
+    '  if (value === "true") return true;',
+    "  throw new Error(`${name} must be true or false`);",
+    "}",
+    "",
+    "function parseStarterAmount(value: string): number {",
+    '  if (!/^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?$/.test(value)) throw new Error("CLINK_STARTER_UNIT_AMOUNT must be a positive decimal with at most two fractional digits");',
+    "  const amount = Number(value);",
+    '  if (!Number.isFinite(amount) || amount <= 0) throw new Error("CLINK_STARTER_UNIT_AMOUNT must be greater than zero");',
+    "  return amount;",
+    "}",
+    "",
+    "function parseStarterCurrency(value: string): string {",
+    "  const currency = value.toUpperCase();",
+    '  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Starter currency must be a three-letter code");',
+    "  return currency;",
+    "}",
+    "",
+    "function requireInputString(value: unknown, field: string): string {",
+    '  if (typeof value !== "string" || value.trim() === "") throw new StarterRequestError(`${field} must be a non-empty string`);',
+    "  return value;",
+    "}",
+    "",
+    "function optionalInputString(value: unknown, field: string): string | undefined {",
+    "  if (value === undefined) return undefined;",
+    "  return requireInputString(value, field);",
+    "}",
+    "",
+    "function optionalEnv(name: string): string | undefined {",
+    "  const value = process.env[name]?.trim();",
+    "  return value || undefined;",
+    "}",
+    "",
+    "function starterAppUrl(path: string): string {",
+    '  const base = requireEnv("APP_URL");',
+    '  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString();',
+    "}",
+    "",
+    "function roundMoney(value: number): number {",
+    "  return Math.round((value + Number.EPSILON) * 100) / 100;",
+    "}",
+    "",
+    "function normalizeEventCreated(value: unknown, id: string, type: string): number {",
+    '  if (typeof value === "number" && Number.isInteger(value)) return value;',
+    '  if (typeof value === "string") {',
+    "    const parsed = Date.parse(value);",
+    "    if (Number.isFinite(parsed)) return parsed;",
+    "  }",
+    "  throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: invalid created timestamp`);",
+    "}",
+    "",
+    "function requireEventString(value: unknown, field: string): string {",
+    '  if (typeof value === "string" && value.length > 0) return value;',
+    "  throw new Error(`Unrecognized Clink webhook payload: ${field} must be a non-empty string`);",
+    "}",
+    "",
+    "function isRecord(value: unknown): value is Record<string, unknown> {",
+    '  return Boolean(value) && typeof value === "object" && !Array.isArray(value);',
+    "}",
+    "",
     "function safeCompare(a: string, b: string): boolean {",
     "  const aBuffer = Buffer.from(a);",
     "  const bBuffer = Buffer.from(b);",
@@ -7849,17 +8850,18 @@ function nextClinkLibrary() {
 function nextCheckoutRoute() {
   return lines([
     'import { NextResponse } from "next/server";',
-    'import { buildCheckoutPayload, errorMessage, postClink } from "../../../../lib/clink";',
+    'import { createCheckoutSession, starterHttpError } from "../../../../lib/clink";',
     "",
     'export const runtime = "nodejs";',
     "",
     "export async function POST(request: Request) {",
     "  try {",
     "    const input = (await request.json()) as Record<string, unknown>;",
-    '    const result = await postClink("/checkout/session", buildCheckoutPayload(input));',
+    "    const result = await createCheckoutSession(input);",
     "    return NextResponse.json({ ok: true, result });",
     "  } catch (error) {",
-    "    return NextResponse.json({ ok: false, error: errorMessage(error) }, { status: 500 });",
+    "    const failure = starterHttpError(error);",
+    "    return NextResponse.json({ ok: false, error: failure.message }, { status: failure.status });",
     "  }",
     "}"
   ]);
@@ -7867,7 +8869,7 @@ function nextCheckoutRoute() {
 function nextSubscriptionRoute() {
   return lines([
     'import { NextResponse } from "next/server";',
-    'import { buildSubscriptionPayload, errorMessage, postClink } from "../../../../lib/clink";',
+    'import { buildSubscriptionPayload, postClink, starterHttpError } from "../../../../lib/clink";',
     "",
     'export const runtime = "nodejs";',
     "",
@@ -7877,7 +8879,8 @@ function nextSubscriptionRoute() {
     '    const result = await postClink("/subscription", buildSubscriptionPayload(input));',
     "    return NextResponse.json({ ok: true, result });",
     "  } catch (error) {",
-    "    return NextResponse.json({ ok: false, error: errorMessage(error) }, { status: 500 });",
+    "    const failure = starterHttpError(error);",
+    "    return NextResponse.json({ ok: false, error: failure.message }, { status: failure.status });",
     "  }",
     "}"
   ]);
@@ -7885,7 +8888,7 @@ function nextSubscriptionRoute() {
 function nextWebhookRoute() {
   return lines([
     'import { NextResponse } from "next/server";',
-    'import { errorMessage, requireEnv, verifyClinkWebhook } from "../../../../lib/clink";',
+    'import { dispatchClinkWebhookEvent, normalizeClinkWebhook, requireEnv, verifyClinkWebhook } from "../../../../lib/clink";',
     "",
     'export const runtime = "nodejs";',
     "",
@@ -7905,12 +8908,12 @@ function nextWebhookRoute() {
     '      return NextResponse.json({ ok: false, error: "Invalid Clink webhook signature" }, { status: 400 });',
     "    }",
     "",
-    "    const event = JSON.parse(rawBody) as { type?: string; eventType?: string };",
-    '    console.log("Received Clink event", event.type ?? event.eventType ?? "unknown");',
+    "    const event = normalizeClinkWebhook(JSON.parse(rawBody) as unknown);",
+    "    dispatchClinkWebhookEvent(event);",
     "",
     "    return NextResponse.json({ ok: true });",
-    "  } catch (error) {",
-    "    return NextResponse.json({ ok: false, error: errorMessage(error) }, { status: 500 });",
+    "  } catch {",
+    '    return NextResponse.json({ ok: false, error: "Webhook processing failed" }, { status: 500 });',
     "  }",
     "}"
   ]);
@@ -7918,12 +8921,26 @@ function nextWebhookRoute() {
 function expressServer() {
   return lines([
     'import "dotenv/config";',
-    'import { createHmac, timingSafeEqual } from "node:crypto";',
+    'import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";',
     'import express from "express";',
     "",
     "const app = express();",
     "const port = Number(process.env.PORT ?? 3000);",
     'const defaultBaseUrl = "https://uat-api.clinkbill.com/api/";',
+    "const webhookToleranceMs = 300_000;",
+    'const allowedClinkPostPaths = new Set(["checkout/session", "subscription"]);',
+    "const serverControlledCheckoutFields = new Set([",
+    '  "amount", "originalAmount", "currency", "originalCurrency", "unitAmount", "priceDataList",',
+    '  "productId", "priceId", "name", "imageUrl", "merchantReferenceId", "successUrl", "cancelUrl", "returnUrl", "redirectUrl",',
+    '  "paymentMethodType", "allowPromotionCodes", "uiMode",',
+    "]);",
+    "const serverControlledSubscriptionFields = new Set([",
+    '  "productId", "priceId", "merchantReferenceId", "paymentMethodType", "paymentCurrency",',
+    '  "returnUrl", "metadata",',
+    "]);",
+    `const supportedClinkWebhookEvents = new Set(${JSON.stringify(starterWebhookEvents)});`,
+    "",
+    "class StarterRequestError extends Error {}",
     "",
     'app.post("/api/clink/webhook", express.raw({ type: "application/json" }), (req, res) => {',
     '  const timestamp = req.header("x-clink-timestamp");',
@@ -7939,17 +8956,20 @@ function expressServer() {
     '    return res.status(400).json({ ok: false, error: "Invalid Clink webhook signature" });',
     "  }",
     "",
-    "  const event = JSON.parse(rawBody);",
-    '  console.log("Received Clink event", event.type ?? event.eventType ?? "unknown");',
-    "",
-    "  return res.json({ ok: true });",
+    "  try {",
+    "    const event = normalizeClinkWebhook(JSON.parse(rawBody));",
+    "    dispatchClinkWebhookEvent(event);",
+    "    return res.json({ ok: true });",
+    "  } catch {",
+    '    return res.status(500).json({ ok: false, error: "Webhook processing failed" });',
+    "  }",
     "});",
     "",
     "app.use(express.json());",
     "",
     'app.post("/api/clink/checkout", async (req, res, next) => {',
     "  try {",
-    '    const result = await postClink("/checkout/session", buildCheckoutPayload(req.body ?? {}));',
+    "    const result = await createCheckoutSession(req.body ?? {});",
     "    res.json({ ok: true, result });",
     "  } catch (error) {",
     "    next(error);",
@@ -7966,8 +8986,8 @@ function expressServer() {
     "});",
     "",
     "app.use((error, _req, res, _next) => {",
-    "  const message = error instanceof Error ? error.message : String(error);",
-    "  res.status(500).json({ ok: false, error: message });",
+    "  const failure = starterHttpError(error);",
+    "  res.status(failure.status).json({ ok: false, error: failure.message });",
     "});",
     "",
     "app.listen(port, () => {",
@@ -7985,7 +9005,17 @@ function expressServer() {
     "function clinkApiUrl(path) {",
     "  const baseUrl = process.env.CLINK_BASE_URL ?? defaultBaseUrl;",
     '  const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;',
-    '  return new URL(path.replace(/^\\/+/, ""), normalizedBaseUrl).toString();',
+    "  const base = new URL(normalizedBaseUrl);",
+    '  if (path.includes("\\\\") || path.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(path)) {',
+    '    throw new Error("Clink API path must be an internal relative path");',
+    "  }",
+    '  const relativePath = path.replace(/^\\/+/, "");',
+    '  if (!allowedClinkPostPaths.has(relativePath)) throw new Error("Clink API path is not allowed by this starter");',
+    "  const resolved = new URL(relativePath, base);",
+    "  if (resolved.origin !== base.origin || !resolved.pathname.startsWith(base.pathname)) {",
+    '    throw new Error("Clink API path escaped the configured API base");',
+    "  }",
+    "  return resolved.toString();",
     "}",
     "",
     "async function postClink(path, body) {",
@@ -8009,57 +9039,179 @@ function expressServer() {
     "  return data;",
     "}",
     "",
-    "function verifyClinkWebhook(secret, timestamp, rawBody, signature) {",
+    "function verifyClinkWebhook(secret, timestamp, rawBody, signature, nowMs = Date.now()) {",
+    "  const timestampMs = parseWebhookTimestampMs(timestamp);",
+    "  if (timestampMs === undefined || !Number.isSafeInteger(nowMs) || Math.abs(nowMs - timestampMs) > webhookToleranceMs) return false;",
     '  const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");',
     "  return safeCompare(expected, signature);",
     "}",
     "",
+    "function normalizeClinkWebhook(payload) {",
+    '  if (!isRecord(payload)) throw new Error("Unrecognized Clink webhook payload: expected a JSON object");',
+    '  const id = requireEventString(payload.id, "event.id");',
+    '  const type = requireEventString(payload.type, "event.type");',
+    '  if (payload.object !== "event" || !isRecord(payload.data)) {',
+    "    throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: invalid event envelope`);",
+    "  }",
+    "",
+    "  const created = normalizeEventCreated(payload.created, id, type);",
+    "  if (isRecord(payload.data.object)) {",
+    '    return { id, object: "event", created, type, data: { object: payload.data.object } };',
+    "  }",
+    '  if (typeof payload.data.object === "string") {',
+    '    const resource = Object.fromEntries(Object.entries(payload.data).filter(([key]) => key !== "object"));',
+    "    if (Array.isArray(resource.lineItems) && resource.items === undefined) {",
+    "      resource.items = resource.lineItems;",
+    "      delete resource.lineItems;",
+    "    }",
+    '    console.warn(JSON.stringify({ level: "warn", metric: "clink_webhook_legacy_payload_total", value: 1, eventId: id, eventType: type }));',
+    '    return { id, object: "event", created, type, data: { object: resource } };',
+    "  }",
+    "  throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: data.object must be an object or legacy string`);",
+    "}",
+    "",
+    "function dispatchClinkWebhookEvent(event) {",
+    "  if (!supportedClinkWebhookEvents.has(event.type)) {",
+    '    console.error(JSON.stringify({ level: "error", code: "clink_webhook_unknown_event", eventId: event.id, eventType: event.type, retry: true }));',
+    "    throw new Error(`Unsupported Clink webhook event type: ${event.type}`);",
+    "  }",
+    '  console.log(JSON.stringify({ level: "info", code: "clink_webhook_received", eventId: event.id, eventType: event.type }));',
+    "  // Persist to your idempotent webhook Inbox and dispatch business handlers here.",
+    "}",
+    "",
     "function buildCheckoutPayload(input) {",
-    "  const amount = Number(input.amount ?? input.originalAmount ?? 19.99);",
-    '  const currency = String(input.currency ?? input.originalCurrency ?? "USD").toUpperCase();',
+    "  rejectServerControlledFields(input, serverControlledCheckoutFields);",
+    "  const price = loadStarterCheckoutPrice(input.priceKey);",
+    '  const quantity = parseStarterQuantity(input.quantity, price.mode === "inline" && price.allowQuantity);',
+    '  const originalAmount = price.mode === "inline" ? roundMoney(price.unitAmount * quantity) : price.unitAmount;',
     "  const body = {",
-    "    customerEmail: input.customerEmail,",
-    "    originalAmount: amount,",
-    "    originalCurrency: currency,",
-    "    merchantReferenceId: input.merchantReferenceId,",
-    "    successUrl: input.successUrl,",
-    "    cancelUrl: input.cancelUrl,",
-    '    uiMode: input.uiMode ?? "hostedPage",',
-    "    returnUrl: input.returnUrl,",
-    "    paymentMethodType: input.paymentMethodType,",
-    "    allowPromotionCodes: Boolean(input.allowPromotionCodes),",
+    '    customerEmail: optionalInputString(input.customerEmail, "customerEmail"),',
+    "    originalAmount,",
+    "    originalCurrency: price.currency,",
+    "    merchantReferenceId: `starter_checkout_${randomUUID()}` ,",
+    '    successUrl: starterAppUrl("success"),',
+    '    cancelUrl: starterAppUrl("cancel"),',
+    '    uiMode: "hostedPage",',
+    "    allowPromotionCodes: false,",
     "  };",
     "",
-    "  if (input.productId || input.priceId) {",
-    "    body.productId = input.productId;",
-    "    body.priceId = input.priceId;",
+    '  if (price.mode === "registered") {',
+    "    body.productId = price.productId;",
+    "    body.priceId = price.priceId;",
     "  } else {",
     "    body.priceDataList = [{",
-    '      name: input.name ?? "Test Product",',
-    "      quantity: Number(input.quantity ?? 1),",
-    "      unitAmount: amount,",
-    "      currency,",
-    "      imageUrl: input.imageUrl,",
+    "      name: price.name,",
+    "      quantity,",
+    "      unitAmount: price.unitAmount,",
+    "      currency: price.currency,",
+    "      imageUrl: price.imageUrl,",
     "    }];",
     "  }",
     "",
     "  return body;",
     "}",
     "",
+    "async function createCheckoutSession(input) {",
+    "  const payload = buildCheckoutPayload(input);",
+    '  return postClink("/checkout/session", payload);',
+    "}",
+    "",
     "function buildSubscriptionPayload(input) {",
+    "  rejectServerControlledFields(input, serverControlledSubscriptionFields);",
+    '  const planKey = requireInputString(input.planKey, "planKey");',
+    '  if (planKey !== requireEnv("CLINK_STARTER_PLAN_KEY")) throw new StarterRequestError("Unknown subscription planKey");',
     "  return {",
-    "    customerId: input.customerId,",
-    "    customerEmail: input.customerEmail,",
-    "    referenceCustomerId: input.referenceCustomerId,",
-    "    merchantReferenceId: input.merchantReferenceId,",
-    "    productId: input.productId,",
-    "    priceId: input.priceId,",
-    "    paymentInstrumentId: input.paymentInstrumentId,",
-    '    paymentMethodType: input.paymentMethodType ?? "CARD",',
-    '    paymentCurrency: String(input.paymentCurrency ?? "USD").toUpperCase(),',
-    "    returnUrl: input.returnUrl,",
-    "    metadata: input.metadata,",
+    '    customerId: optionalInputString(input.customerId, "customerId"),',
+    '    customerEmail: optionalInputString(input.customerEmail, "customerEmail"),',
+    '    referenceCustomerId: optionalInputString(input.referenceCustomerId, "referenceCustomerId"),',
+    "    merchantReferenceId: `starter_subscription_${randomUUID()}` ,",
+    '    productId: requireEnv("CLINK_STARTER_SUBSCRIPTION_PRODUCT_ID"),',
+    '    priceId: requireEnv("CLINK_STARTER_SUBSCRIPTION_PRICE_ID"),',
+    '    paymentInstrumentId: optionalInputString(input.paymentInstrumentId, "paymentInstrumentId"),',
+    '    paymentMethodType: "CARD",',
+    '    paymentCurrency: parseStarterCurrency(requireEnv("CLINK_STARTER_SUBSCRIPTION_CURRENCY")),',
+    '    returnUrl: starterAppUrl("account"),',
     "  };",
+    "}",
+    "",
+    "function parseWebhookTimestampMs(timestamp) {",
+    "  if (!/^(?:0|[1-9][0-9]*)$/.test(timestamp)) return undefined;",
+    "  const parsed = Number(timestamp);",
+    "  if (!Number.isSafeInteger(parsed)) return undefined;",
+    "  const timestampMs = parsed < 1_000_000_000_000 ? parsed * 1000 : parsed;",
+    "  return Number.isSafeInteger(timestampMs) ? timestampMs : undefined;",
+    "}",
+    "",
+    "function loadStarterCheckoutPrice(value) {",
+    '  const priceKey = requireInputString(value, "priceKey");',
+    '  if (priceKey !== requireEnv("CLINK_STARTER_PRICE_KEY")) throw new StarterRequestError("Unknown checkout priceKey");',
+    '  const mode = requireEnv("CLINK_STARTER_PRICE_MODE");',
+    '  const unitAmount = parseStarterAmount(requireEnv("CLINK_STARTER_UNIT_AMOUNT"));',
+    '  const currency = parseStarterCurrency(requireEnv("CLINK_STARTER_CURRENCY"));',
+    '  if (mode === "registered") return { mode, unitAmount, currency, productId: requireEnv("CLINK_STARTER_PRODUCT_ID"), priceId: requireEnv("CLINK_STARTER_PRICE_ID"), allowQuantity: false };',
+    '  if (mode === "inline") return { mode, unitAmount, currency, name: requireEnv("CLINK_STARTER_PRODUCT_NAME"), imageUrl: optionalEnv("CLINK_STARTER_PRODUCT_IMAGE_URL"), allowQuantity: parseStarterBoolean(process.env.CLINK_STARTER_ALLOW_QUANTITY, "CLINK_STARTER_ALLOW_QUANTITY") };',
+    '  throw new Error("CLINK_STARTER_PRICE_MODE must be inline or registered");',
+    "}",
+    "",
+    "function rejectServerControlledFields(input, fields) {",
+    "  for (const field of fields) {",
+    "    if (Object.prototype.hasOwnProperty.call(input, field)) throw new StarterRequestError(`Starter request field ${field} is server-controlled`);",
+    "  }",
+    "}",
+    "",
+    "function parseStarterQuantity(value, allowed) {",
+    "  const quantity = value === undefined ? 1 : value;",
+    '  if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 1 || quantity > 10) throw new StarterRequestError("quantity must be an integer from 1 through 10");',
+    '  if (!allowed && value !== undefined) throw new StarterRequestError("This price does not allow a client-selected quantity");',
+    "  return quantity;",
+    "}",
+    "",
+    "function parseStarterBoolean(value, name) {",
+    '  if (value === undefined || value === "false") return false;',
+    '  if (value === "true") return true;',
+    "  throw new Error(`${name} must be true or false`);",
+    "}",
+    "",
+    "function parseStarterAmount(value) {",
+    '  if (!/^(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?$/.test(value)) throw new Error("CLINK_STARTER_UNIT_AMOUNT must be a positive decimal with at most two fractional digits");',
+    "  const amount = Number(value);",
+    '  if (!Number.isFinite(amount) || amount <= 0) throw new Error("CLINK_STARTER_UNIT_AMOUNT must be greater than zero");',
+    "  return amount;",
+    "}",
+    "",
+    "function parseStarterCurrency(value) {",
+    "  const currency = value.toUpperCase();",
+    '  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Starter currency must be a three-letter code");',
+    "  return currency;",
+    "}",
+    "",
+    "function requireInputString(value, field) {",
+    '  if (typeof value !== "string" || value.trim() === "") throw new StarterRequestError(`${field} must be a non-empty string`);',
+    "  return value;",
+    "}",
+    "",
+    "function starterHttpError(error) {",
+    "  if (error instanceof StarterRequestError) return { status: 400, message: error.message };",
+    '  return { status: 500, message: "Clink starter request failed" };',
+    "}",
+    "",
+    "function optionalInputString(value, field) {",
+    "  if (value === undefined) return undefined;",
+    "  return requireInputString(value, field);",
+    "}",
+    "",
+    "function optionalEnv(name) {",
+    "  const value = process.env[name]?.trim();",
+    "  return value || undefined;",
+    "}",
+    "",
+    "function starterAppUrl(path) {",
+    '  const base = requireEnv("APP_URL");',
+    '  return new URL(path, base.endsWith("/") ? base : `${base}/`).toString();',
+    "}",
+    "",
+    "function roundMoney(value) {",
+    "  return Math.round((value + Number.EPSILON) * 100) / 100;",
     "}",
     "",
     "function parseResponseBody(text) {",
@@ -8069,6 +9221,24 @@ function expressServer() {
     "  } catch {",
     "    return text;",
     "  }",
+    "}",
+    "",
+    "function normalizeEventCreated(value, id, type) {",
+    '  if (typeof value === "number" && Number.isInteger(value)) return value;',
+    '  if (typeof value === "string") {',
+    "    const parsed = Date.parse(value);",
+    "    if (Number.isFinite(parsed)) return parsed;",
+    "  }",
+    "  throw new Error(`Unrecognized Clink webhook payload ${id}/${type}: invalid created timestamp`);",
+    "}",
+    "",
+    "function requireEventString(value, field) {",
+    '  if (typeof value === "string" && value.length > 0) return value;',
+    "  throw new Error(`Unrecognized Clink webhook payload: ${field} must be a non-empty string`);",
+    "}",
+    "",
+    "function isRecord(value) {",
+    '  return Boolean(value) && typeof value === "object" && !Array.isArray(value);',
     "}",
     "",
     "function safeCompare(a, b) {",
@@ -8087,25 +9257,52 @@ function fastapiMain() {
     "import hmac",
     "import json",
     "import os",
+    "import re",
     "import time",
+    "import uuid",
     "from typing import Any",
+    "from urllib.parse import urljoin, urlparse",
     "",
     "import httpx",
     "from fastapi import FastAPI, Header, HTTPException, Request",
     "",
     'app = FastAPI(title="Clink FastAPI Starter")',
     'DEFAULT_BASE_URL = "https://uat-api.clinkbill.com/api/"',
+    "WEBHOOK_TOLERANCE_MS = 300_000",
+    'ALLOWED_CLINK_POST_PATHS = {"checkout/session", "subscription"}',
+    "SERVER_CONTROLLED_CHECKOUT_FIELDS = {",
+    '    "amount", "originalAmount", "currency", "originalCurrency", "unitAmount", "priceDataList",',
+    '    "productId", "priceId", "name", "imageUrl", "merchantReferenceId", "successUrl", "cancelUrl", "returnUrl", "redirectUrl",',
+    '    "paymentMethodType", "allowPromotionCodes", "uiMode",',
+    "}",
+    "SERVER_CONTROLLED_SUBSCRIPTION_FIELDS = {",
+    '    "productId", "priceId", "merchantReferenceId", "paymentMethodType", "paymentCurrency",',
+    '    "returnUrl", "metadata",',
+    "}",
+    `SUPPORTED_CLINK_WEBHOOK_EVENTS = set(${JSON.stringify(starterWebhookEvents)})`,
+    "",
+    "",
+    "class StarterRequestError(ValueError):",
+    "    pass",
     "",
     "",
     '@app.post("/api/clink/checkout")',
     "async def create_checkout_session(payload: dict[str, Any]) -> dict[str, Any]:",
-    '    result = await post_clink("/checkout/session", build_checkout_payload(payload))',
+    "    try:",
+    "        body = build_checkout_payload(payload)",
+    "    except StarterRequestError as exc:",
+    "        raise HTTPException(status_code=400, detail=str(exc)) from exc",
+    '    result = await post_clink("/checkout/session", body)',
     '    return {"ok": True, "result": result}',
     "",
     "",
     '@app.post("/api/clink/subscription")',
     "async def create_subscription(payload: dict[str, Any]) -> dict[str, Any]:",
-    '    result = await post_clink("/subscription", build_subscription_payload(payload))',
+    "    try:",
+    "        body = build_subscription_payload(payload)",
+    "    except StarterRequestError as exc:",
+    "        raise HTTPException(status_code=400, detail=str(exc)) from exc",
+    '    result = await post_clink("/subscription", body)',
     '    return {"ok": True, "result": result}',
     "",
     "",
@@ -8132,7 +9329,11 @@ function fastapiMain() {
     "    except json.JSONDecodeError as exc:",
     '        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc',
     "",
-    '    print("Received Clink event", event.get("type") or event.get("eventType") or "unknown")',
+    "    try:",
+    "        event = normalize_clink_webhook(event)",
+    "        dispatch_clink_webhook_event(event)",
+    "    except (ValueError, RuntimeError) as exc:",
+    '        raise HTTPException(status_code=500, detail="Webhook processing failed") from exc',
     '    return {"ok": True}',
     "",
     "",
@@ -8163,7 +9364,17 @@ function fastapiMain() {
     "def clink_api_url(path: str) -> str:",
     '    base_url = os.environ.get("CLINK_BASE_URL", DEFAULT_BASE_URL)',
     '    normalized_base_url = base_url if base_url.endswith("/") else f"{base_url}/"',
-    '    return normalized_base_url + path.lstrip("/")',
+    '    if "\\\\" in path or path.startswith("//") or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", path):',
+    '        raise ValueError("Clink API path must be an internal relative path")',
+    '    relative_path = path.lstrip("/")',
+    "    if relative_path not in ALLOWED_CLINK_POST_PATHS:",
+    '        raise ValueError("Clink API path is not allowed by this starter")',
+    "    resolved = urljoin(normalized_base_url, relative_path)",
+    "    base = urlparse(normalized_base_url)",
+    "    target = urlparse(resolved)",
+    "    if (target.scheme, target.netloc) != (base.scheme, base.netloc) or not target.path.startswith(base.path):",
+    '        raise ValueError("Clink API path escaped the configured API base")',
+    "    return resolved",
     "",
     "",
     "def require_env(name: str) -> str:",
@@ -8173,59 +9384,200 @@ function fastapiMain() {
     "    return value",
     "",
     "",
-    "def verify_clink_webhook(secret: str, timestamp: str, raw_body: bytes, signature: str) -> bool:",
+    "def verify_clink_webhook(secret: str, timestamp: str, raw_body: bytes, signature: str, now_ms: int | None = None) -> bool:",
+    "    timestamp_ms = parse_webhook_timestamp_ms(timestamp)",
+    "    current_ms = int(time.time() * 1000) if now_ms is None else now_ms",
+    "    if timestamp_ms is None or not isinstance(current_ms, int) or abs(current_ms - timestamp_ms) > WEBHOOK_TOLERANCE_MS:",
+    "        return False",
     '    signed_payload = timestamp.encode("utf-8") + b"." + raw_body',
     '    expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()',
     "    return hmac.compare_digest(expected, signature)",
     "",
     "",
+    "def normalize_clink_webhook(payload: Any) -> dict[str, Any]:",
+    "    if not isinstance(payload, dict):",
+    '        raise ValueError("Unrecognized Clink webhook payload: expected a JSON object")',
+    '    event_id = require_event_string(payload.get("id"), "event.id")',
+    '    event_type = require_event_string(payload.get("type"), "event.type")',
+    '    data = payload.get("data")',
+    '    if payload.get("object") != "event" or not isinstance(data, dict):',
+    '        raise ValueError(f"Unrecognized Clink webhook payload {event_id}/{event_type}: invalid event envelope")',
+    "",
+    '    created = normalize_event_created(payload.get("created"), event_id, event_type)',
+    '    resource = data.get("object")',
+    "    if isinstance(resource, dict):",
+    '        return {"id": event_id, "object": "event", "created": created, "type": event_type, "data": {"object": resource}}',
+    "",
+    "    if isinstance(resource, str):",
+    '        normalized_resource = {key: value for key, value in data.items() if key != "object"}',
+    '        if isinstance(normalized_resource.get("lineItems"), list) and "items" not in normalized_resource:',
+    '            normalized_resource["items"] = normalized_resource.pop("lineItems")',
+    '        print(json.dumps({"level": "warn", "metric": "clink_webhook_legacy_payload_total", "value": 1, "eventId": event_id, "eventType": event_type}))',
+    '        return {"id": event_id, "object": "event", "created": created, "type": event_type, "data": {"object": normalized_resource}}',
+    "",
+    '    raise ValueError(f"Unrecognized Clink webhook payload {event_id}/{event_type}: data.object must be an object or legacy string")',
+    "",
+    "",
+    "def dispatch_clink_webhook_event(event: dict[str, Any]) -> None:",
+    '    if event["type"] not in SUPPORTED_CLINK_WEBHOOK_EVENTS:',
+    '        print(json.dumps({"level": "error", "code": "clink_webhook_unknown_event", "eventId": event["id"], "eventType": event["type"], "retry": True}))',
+    `        raise RuntimeError(f"Unsupported Clink webhook event type: {event['type']}")`,
+    '    print(json.dumps({"level": "info", "code": "clink_webhook_received", "eventId": event["id"], "eventType": event["type"]}))',
+    "    # Persist to your idempotent webhook Inbox and dispatch business handlers here.",
+    "",
+    "",
+    "def normalize_event_created(value: Any, event_id: str, event_type: str) -> int:",
+    "    if isinstance(value, int):",
+    "        return value",
+    "    if isinstance(value, str):",
+    "        try:",
+    "            from datetime import datetime",
+    '            return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)',
+    "        except ValueError:",
+    "            pass",
+    '    raise ValueError(f"Unrecognized Clink webhook payload {event_id}/{event_type}: invalid created timestamp")',
+    "",
+    "",
+    "def require_event_string(value: Any, field: str) -> str:",
+    "    if isinstance(value, str) and value:",
+    "        return value",
+    '    raise ValueError(f"Unrecognized Clink webhook payload: {field} must be a non-empty string")',
+    "",
+    "",
     "def build_checkout_payload(input_data: dict[str, Any]) -> dict[str, Any]:",
-    '    amount = float(input_data.get("amount") or input_data.get("originalAmount") or 19.99)',
-    '    currency = str(input_data.get("currency") or input_data.get("originalCurrency") or "USD").upper()',
+    "    reject_server_controlled_fields(input_data, SERVER_CONTROLLED_CHECKOUT_FIELDS)",
+    '    price = load_starter_checkout_price(input_data.get("priceKey"))',
+    '    quantity = parse_starter_quantity(input_data.get("quantity"), "quantity" in input_data, price["mode"] == "inline" and price["allowQuantity"])',
+    '    original_amount = round(price["unitAmount"] * quantity, 2) if price["mode"] == "inline" else price["unitAmount"]',
     "    body: dict[str, Any] = {",
-    '        "customerEmail": input_data.get("customerEmail"),',
-    '        "originalAmount": amount,',
-    '        "originalCurrency": currency,',
-    '        "merchantReferenceId": input_data.get("merchantReferenceId"),',
-    '        "successUrl": input_data.get("successUrl"),',
-    '        "cancelUrl": input_data.get("cancelUrl"),',
-    '        "uiMode": input_data.get("uiMode") or "hostedPage",',
-    '        "returnUrl": input_data.get("returnUrl"),',
-    '        "paymentMethodType": input_data.get("paymentMethodType"),',
-    '        "allowPromotionCodes": bool(input_data.get("allowPromotionCodes")),',
+    '        "customerEmail": optional_input_string(input_data.get("customerEmail"), "customerEmail"),',
+    '        "originalAmount": original_amount,',
+    '        "originalCurrency": price["currency"],',
+    '        "merchantReferenceId": f"starter_checkout_{uuid.uuid4()}" ,',
+    '        "successUrl": starter_app_url("success"),',
+    '        "cancelUrl": starter_app_url("cancel"),',
+    '        "uiMode": "hostedPage",',
+    '        "allowPromotionCodes": False,',
     "    }",
     "",
-    '    if input_data.get("productId") or input_data.get("priceId"):',
-    '        body["productId"] = input_data.get("productId")',
-    '        body["priceId"] = input_data.get("priceId")',
+    '    if price["mode"] == "registered":',
+    '        body["productId"] = price["productId"]',
+    '        body["priceId"] = price["priceId"]',
     "    else:",
     '        body["priceDataList"] = [',
     "            {",
-    '                "name": input_data.get("name") or "Test Product",',
-    '                "quantity": int(input_data.get("quantity") or 1),',
-    '                "unitAmount": amount,',
-    '                "currency": currency,',
-    '                "imageUrl": input_data.get("imageUrl"),',
+    '                "name": price["name"],',
+    '                "quantity": quantity,',
+    '                "unitAmount": price["unitAmount"],',
+    '                "currency": price["currency"],',
     "            }",
     "        ]",
+    '        if price["imageUrl"]:',
+    '            body["priceDataList"][0]["imageUrl"] = price["imageUrl"]',
     "",
     "    return body",
     "",
     "",
     "def build_subscription_payload(input_data: dict[str, Any]) -> dict[str, Any]:",
+    "    reject_server_controlled_fields(input_data, SERVER_CONTROLLED_SUBSCRIPTION_FIELDS)",
+    '    plan_key = require_input_string(input_data.get("planKey"), "planKey")',
+    '    if plan_key != require_env("CLINK_STARTER_PLAN_KEY"):',
+    '        raise StarterRequestError("Unknown subscription planKey")',
     "    return {",
-    '        "customerId": input_data.get("customerId"),',
-    '        "customerEmail": input_data.get("customerEmail"),',
-    '        "referenceCustomerId": input_data.get("referenceCustomerId"),',
-    '        "merchantReferenceId": input_data.get("merchantReferenceId"),',
-    '        "productId": input_data.get("productId"),',
-    '        "priceId": input_data.get("priceId"),',
-    '        "paymentInstrumentId": input_data.get("paymentInstrumentId"),',
-    '        "paymentMethodType": input_data.get("paymentMethodType") or "CARD",',
-    '        "paymentCurrency": str(input_data.get("paymentCurrency") or "USD").upper(),',
-    '        "returnUrl": input_data.get("returnUrl"),',
-    '        "metadata": input_data.get("metadata"),',
-    "    }"
+    '        "customerId": optional_input_string(input_data.get("customerId"), "customerId"),',
+    '        "customerEmail": optional_input_string(input_data.get("customerEmail"), "customerEmail"),',
+    '        "referenceCustomerId": optional_input_string(input_data.get("referenceCustomerId"), "referenceCustomerId"),',
+    '        "merchantReferenceId": f"starter_subscription_{uuid.uuid4()}" ,',
+    '        "productId": require_env("CLINK_STARTER_SUBSCRIPTION_PRODUCT_ID"),',
+    '        "priceId": require_env("CLINK_STARTER_SUBSCRIPTION_PRICE_ID"),',
+    '        "paymentInstrumentId": optional_input_string(input_data.get("paymentInstrumentId"), "paymentInstrumentId"),',
+    '        "paymentMethodType": "CARD",',
+    '        "paymentCurrency": parse_starter_currency(require_env("CLINK_STARTER_SUBSCRIPTION_CURRENCY")),',
+    '        "returnUrl": starter_app_url("account"),',
+    "    }",
+    "",
+    "",
+    "def parse_webhook_timestamp_ms(timestamp: str) -> int | None:",
+    '    if re.fullmatch(r"(?:0|[1-9][0-9]*)", timestamp) is None:',
+    "        return None",
+    "    parsed = int(timestamp)",
+    "    if parsed > 9_007_199_254_740_991:",
+    "        return None",
+    "    timestamp_ms = parsed * 1000 if parsed < 1_000_000_000_000 else parsed",
+    "    return timestamp_ms if timestamp_ms <= 9_007_199_254_740_991 else None",
+    "",
+    "",
+    "def load_starter_checkout_price(value: Any) -> dict[str, Any]:",
+    '    price_key = require_input_string(value, "priceKey")',
+    '    if price_key != require_env("CLINK_STARTER_PRICE_KEY"):',
+    '        raise StarterRequestError("Unknown checkout priceKey")',
+    '    mode = require_env("CLINK_STARTER_PRICE_MODE")',
+    '    unit_amount = parse_starter_amount(require_env("CLINK_STARTER_UNIT_AMOUNT"))',
+    '    currency = parse_starter_currency(require_env("CLINK_STARTER_CURRENCY"))',
+    '    if mode == "registered":',
+    '        return {"mode": mode, "unitAmount": unit_amount, "currency": currency, "productId": require_env("CLINK_STARTER_PRODUCT_ID"), "priceId": require_env("CLINK_STARTER_PRICE_ID"), "allowQuantity": False}',
+    '    if mode == "inline":',
+    '        return {"mode": mode, "unitAmount": unit_amount, "currency": currency, "name": require_env("CLINK_STARTER_PRODUCT_NAME"), "imageUrl": optional_env("CLINK_STARTER_PRODUCT_IMAGE_URL"), "allowQuantity": parse_starter_boolean(os.environ.get("CLINK_STARTER_ALLOW_QUANTITY"), "CLINK_STARTER_ALLOW_QUANTITY")}',
+    '    raise ValueError("CLINK_STARTER_PRICE_MODE must be inline or registered")',
+    "",
+    "",
+    "def reject_server_controlled_fields(input_data: dict[str, Any], fields: set[str]) -> None:",
+    "    for field in fields:",
+    "        if field in input_data:",
+    '            raise StarterRequestError(f"Starter request field {field} is server-controlled")',
+    "",
+    "",
+    "def parse_starter_quantity(value: Any, provided: bool, allowed: bool) -> int:",
+    "    quantity = 1 if value is None else value",
+    "    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1 or quantity > 10:",
+    '        raise StarterRequestError("quantity must be an integer from 1 through 10")',
+    "    if not allowed and provided:",
+    '        raise StarterRequestError("This price does not allow a client-selected quantity")',
+    "    return quantity",
+    "",
+    "",
+    "def parse_starter_boolean(value: str | None, name: str) -> bool:",
+    '    if value is None or value == "false":',
+    "        return False",
+    '    if value == "true":',
+    "        return True",
+    '    raise ValueError(f"{name} must be true or false")',
+    "",
+    "",
+    "def parse_starter_amount(value: str) -> float:",
+    '    if re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?", value) is None:',
+    '        raise ValueError("CLINK_STARTER_UNIT_AMOUNT must be a positive decimal with at most two fractional digits")',
+    "    amount = float(value)",
+    "    if amount <= 0:",
+    '        raise ValueError("CLINK_STARTER_UNIT_AMOUNT must be greater than zero")',
+    "    return amount",
+    "",
+    "",
+    "def parse_starter_currency(value: str) -> str:",
+    "    currency = value.upper()",
+    '    if re.fullmatch(r"[A-Z]{3}", currency) is None:',
+    '        raise ValueError("Starter currency must be a three-letter code")',
+    "    return currency",
+    "",
+    "",
+    "def require_input_string(value: Any, field: str) -> str:",
+    "    if not isinstance(value, str) or not value.strip():",
+    '        raise StarterRequestError(f"{field} must be a non-empty string")',
+    "    return value",
+    "",
+    "",
+    "def optional_input_string(value: Any, field: str) -> str | None:",
+    "    return None if value is None else require_input_string(value, field)",
+    "",
+    "",
+    "def optional_env(name: str) -> str | None:",
+    '    value = os.environ.get(name, "").strip()',
+    "    return value or None",
+    "",
+    "",
+    "def starter_app_url(path: str) -> str:",
+    '    base = require_env("APP_URL")',
+    '    return urljoin(base if base.endswith("/") else f"{base}/", path)'
   ]);
 }
 function jsonFile(value) {
@@ -8243,12 +9595,12 @@ function registerInit(program2) {
     const { config } = await getCommandContext(command);
     const starter = createFrameworkStarter(options.framework);
     const files = starter.files.map((file) => ({
-      path: join2(options.out, file.relativePath),
+      path: join3(options.out, file.relativePath),
       content: file.content
     }));
     for (const file of files) {
-      await mkdir4(dirname5(file.path), { recursive: true });
-      await writeFile4(file.path, file.content, { encoding: "utf8", flag: options.force ? "w" : "wx" });
+      await mkdir3(dirname4(file.path), { recursive: true });
+      await writeFile3(file.path, file.content, { encoding: "utf8", flag: options.force ? "w" : "wx" });
     }
     printResult(
       {
@@ -8276,7 +9628,7 @@ function registerLogin(program2) {
       console.log(`Opening ${dashboardLoginUrl}`);
       console.log("Finish login in the browser. The CLI will capture the Dashboard getInfo request after login.");
     }
-    const { chromium } = await importPlaywrightForLogin();
+    const { chromium } = await import("playwright");
     const browser = await launchLoginBrowser(chromium, options.browserChannel);
     try {
       const context = await browser.newContext();
@@ -8348,35 +9700,6 @@ async function getVerifiedDashboardInfo(client, page, credentials, outputMode) {
     return getDashboardInfoFromPage(page, credentials);
   }
 }
-async function importPlaywrightForLogin() {
-  const packageName = "playwright";
-  try {
-    return await import(packageName);
-  } catch (error) {
-    if (isMissingPlaywright(error)) {
-      throw new Error(
-        [
-          "clink login requires optional Playwright browser support, but the playwright package is not installed.",
-          "",
-          "For offline skill usage, Playwright must be pre-provisioned outside this bundle:",
-          "  use an offline-provisioned playwright package, or skip clink login",
-          "",
-          "For browserless, cloud IDE, low-code, sandbox, or dependency-locked environments:",
-          "  use clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox",
-          "",
-          "If this is a browserless, cloud IDE, low-code, or sandbox environment, skip clink login and configure a Secret Key instead:",
-          "  clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox"
-        ].join("\n")
-      );
-    }
-    throw error;
-  }
-}
-function isMissingPlaywright(error) {
-  if (!(error instanceof Error)) return false;
-  const code = "code" in error && typeof error.code === "string" ? error.code : void 0;
-  return ["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND"].includes(code ?? "") && error.message.includes("playwright");
-}
 async function launchLoginBrowser(chromium, channel) {
   const candidates = channel ? [channel] : ["chrome", "msedge", void 0];
   const failures = [];
@@ -8400,8 +9723,8 @@ function formatUser2(user) {
 // src/commands/order.ts
 function registerOrder(program2) {
   const order = program2.command("order").description("Inspect orders with CLINK_SECRET_KEY authentication");
-  order.command("get <order-id>").description("Get order details").action(async (orderId, command) => {
-    const { config, client } = await getCommandContext(command);
+  order.command("get <order-id>").description("Get order details").action(async function(orderId) {
+    const { config, client } = await getCommandContext(this);
     const result = await client.get(`/order/${encodeURIComponent(orderId)}`);
     printResult(result, config.outputMode);
   });
@@ -8460,8 +9783,8 @@ function registerPayment(program2) {
 // src/commands/price.ts
 function registerPrice(program2) {
   const price = program2.command("price").description("Create and list Clink prices");
-  price.command("get <price-id>").description("Get price details").action(async (priceId, command) => {
-    const { config, client } = await getCommandContext(command);
+  price.command("get <price-id>").description("Get price details").action(async function(priceId) {
+    const { config, client } = await getCommandContext(this);
     const result = await client.get(`/price/${encodeURIComponent(priceId)}`);
     printResult(result, config.outputMode);
   });
@@ -8520,8 +9843,8 @@ function registerPrice(program2) {
 // src/commands/product.ts
 function registerProduct(program2) {
   const product = program2.command("product").description("Create and list Clink products");
-  product.command("get <product-id>").description("Get product details").action(async (productId, command) => {
-    const { config, client } = await getCommandContext(command);
+  product.command("get <product-id>").description("Get product details").action(async function(productId) {
+    const { config, client } = await getCommandContext(this);
     const result = await client.get(`/product/${encodeURIComponent(productId)}`);
     printResult(result, config.outputMode);
   });
@@ -8644,8 +9967,8 @@ function registerRefund(program2) {
       "Refund create request completed. Use --json to view the full response and curl example."
     );
   });
-  refund.command("get <refund-id>").description("Get refund details").action(async (refundId, command) => {
-    const { config, client } = await getCommandContext(command);
+  refund.command("get <refund-id>").description("Get refund details").action(async function(refundId) {
+    const { config, client } = await getCommandContext(this);
     const result = await client.get(`/refund/${encodeURIComponent(refundId)}`);
     printResult(result, config.outputMode);
   });
@@ -8717,10 +10040,14 @@ function registerSmokeTest(program2) {
 }
 function withSmokeReconciliationFields(event, values) {
   const data = event.data && typeof event.data === "object" ? event.data : {};
+  const resource = data.object && typeof data.object === "object" ? data.object : {};
   event.data = {
     ...data,
-    merchantReferenceId: values.merchantReferenceId,
-    sessionId: values.sessionId ?? data.sessionId
+    object: {
+      ...resource,
+      merchantReferenceId: values.merchantReferenceId,
+      sessionId: values.sessionId ?? resource.sessionId
+    }
   };
   return event;
 }
@@ -8743,8 +10070,8 @@ function realPaymentVerificationChecklist() {
 // src/commands/subscription.ts
 function registerSubscription(program2) {
   const subscription = program2.command("subscription").description("Create and manage subscriptions");
-  subscription.command("get <subscription-id>").description("Get subscription details").action(async (subscriptionId, command) => {
-    const { config, client } = await getCommandContext(command);
+  subscription.command("get <subscription-id>").description("Get subscription details").action(async function(subscriptionId) {
+    const { config, client } = await getCommandContext(this);
     const result = await client.get(`/subscription/${encodeURIComponent(subscriptionId)}`);
     printResult(result, config.outputMode);
   });
@@ -8795,21 +10122,36 @@ function registerSubscription(program2) {
 }
 
 // src/commands/webhook.ts
-import { mkdir as mkdir5, readFile as readFile7, writeFile as writeFile5 } from "node:fs/promises";
-import { dirname as dirname6 } from "node:path";
+import { mkdir as mkdir4, readFile as readFile7, writeFile as writeFile4 } from "node:fs/promises";
+import { dirname as dirname5 } from "node:path";
+var WEBHOOK_FIXTURE_HELP = [
+  "",
+  "Default merchant-webhook contract: event_ ID, object=event, Unix-millisecond created, and an object-valued data.object resource.",
+  "Invoice fixtures use data.object.items (never lineItems).",
+  `Supported generated event types (${WEBHOOK_FIXTURE_TYPES.length}): ${WEBHOOK_FIXTURE_TYPES.join(", ")}`,
+  "The legacy profile is deprecated and is only for compatibility with old tests; it is never selected by default."
+].join("\n");
 function registerWebhook(program2) {
   const webhook = program2.command("webhook").description("Simulate, sign, verify, and manage Clink webhooks");
   const endpoint = webhook.command("endpoint").description("Manage webhook endpoints with the Secret Key API");
   registerWebhookEndpointSubcommands(endpoint);
-  webhook.command("fixture").description("Write a stable local webhook fixture to disk").argument("<type>", "Event type, for example invoice.paid").requiredOption("--out <file>", "Output JSON file").action(async (type, options, command) => {
+  webhook.command("fixture").description("Generate a stable local merchant webhook fixture and optionally write it to disk").argument("<type>", "Generated event type; see the supported list below").option("--out <file>", "Optional output JSON file; without it the fixture is printed").option("--fixture-profile <profile>", "Fixture profile: merchant-webhook or deprecated legacy (old tests only)", DEFAULT_WEBHOOK_FIXTURE_PROFILE).addHelpText("after", WEBHOOK_FIXTURE_HELP).action(async (type, options, command) => {
     const { config } = await getCommandContext(command);
-    const event = createWebhookFixture(type);
-    await mkdir5(dirname6(options.out), { recursive: true });
-    await writeFile5(options.out, `${JSON.stringify(event, null, 2)}
+    const profile = parseWebhookFixtureProfile(options.fixtureProfile);
+    warnDeprecatedFixtureProfile(profile);
+    const event = createWebhookFixture(type, { profile });
+    if (!options.out) {
+      printResult(event, config.outputMode);
+      return;
+    }
+    await mkdir4(dirname5(options.out), { recursive: true });
+    await writeFile4(options.out, `${JSON.stringify(event, null, 2)}
 `, "utf8");
     printResult(
       {
         eventType: type,
+        profile,
+        warnings: fixtureProfileWarnings(profile),
         out: options.out,
         fixture: event
       },
@@ -8817,11 +10159,13 @@ function registerWebhook(program2) {
       `Wrote ${type} fixture to ${options.out}`
     );
   });
-  webhook.command("simulate").description("Generate a signed local event and optionally POST it to a local endpoint").argument("<type>", "Event type, for example order.succeeded").option("--secret <value>", "Webhook signing key literal or env:CLINK_WEBHOOK_SIGNING_KEY").option("--forward-to <url>", "Local endpoint to POST the signed event to").option("--body-file <path>", "Use a custom JSON event body instead of a generated fixture").action(async (type, options, command) => {
+  webhook.command("simulate").description("Generate a signed local event and optionally POST it to a local endpoint").argument("<type>", "Generated event type; see the supported list below").option("--secret <value>", "Webhook signing key literal or env:CLINK_WEBHOOK_SIGNING_KEY").option("--forward-to <url>", "Local endpoint to POST the signed event to").option("--body-file <path>", "Use a custom JSON event body instead of a generated fixture").option("--fixture-profile <profile>", "Generated fixture profile: merchant-webhook or deprecated legacy (old tests only)", DEFAULT_WEBHOOK_FIXTURE_PROFILE).addHelpText("after", WEBHOOK_FIXTURE_HELP).action(async (type, options, command) => {
     const { config } = await getCommandContext(command);
     const secret = resolveSecretRef(options.secret, []).secret ?? config.webhookSigningKey;
     requireOption("--secret or CLINK_WEBHOOK_SIGNING_KEY", secret);
-    const event = options.bodyFile ? JSON.parse(await readFile7(options.bodyFile, "utf8")) : createWebhookFixture(type);
+    const profile = parseWebhookFixtureProfile(options.fixtureProfile);
+    if (!options.bodyFile) warnDeprecatedFixtureProfile(profile);
+    const event = options.bodyFile ? JSON.parse(await readFile7(options.bodyFile, "utf8")) : createWebhookFixture(type, { profile });
     const rawBody = JSON.stringify(event);
     const timestamp = String(Date.now());
     const signature = signWebhookPayload(secret, timestamp, rawBody);
@@ -8850,6 +10194,8 @@ function registerWebhook(program2) {
     printResult(
       {
         event,
+        fixtureProfile: options.bodyFile ? "custom-body" : profile,
+        warnings: options.bodyFile ? [] : fixtureProfileWarnings(profile),
         timestamp,
         signature,
         headers: {
@@ -8893,6 +10239,18 @@ function registerWebhook(program2) {
     if (!valid) process.exitCode = 1;
   });
 }
+function parseWebhookFixtureProfile(value) {
+  if (WEBHOOK_FIXTURE_PROFILES.includes(value)) return value;
+  throw new Error(`Option --fixture-profile must be one of: ${WEBHOOK_FIXTURE_PROFILES.join(", ")}`);
+}
+function warnDeprecatedFixtureProfile(profile) {
+  for (const warning of fixtureProfileWarnings(profile)) {
+    console.warn(`Deprecated: ${warning}`);
+  }
+}
+function fixtureProfileWarnings(profile) {
+  return isDeprecatedWebhookFixtureProfile(profile) ? ["The legacy webhook fixture profile is deprecated and will be removed in a future release. Migrate to merchant-webhook data.object payloads."] : [];
+}
 function parseNonNegativeIntegerOption(name, value) {
   const parsed = parseIntegerOption(name, value);
   if (parsed < 0) {
@@ -8929,8 +10287,8 @@ function classifyError(error) {
   return ExitCode.GENERAL_ERROR;
 }
 
-// C:/Users/Administrator/AppData/Local/Temp/clink-integ-cli-bundle-aG2Y7a/entry.ts
-var bundledVersion = "0.1.14";
+// clink-integ-cli-bundle/entry.ts
+var bundledVersion = "0.2.1";
 async function main() {
   const program2 = new Command();
   program2.name("clink").description("Merchant developer CLI for ClinkBill integrations").version(bundledVersion).option("--json", "Output machine-readable JSON").option("--profile <name>", "Use a named local profile", "default").option("--env <environment>", "Environment name: sandbox, production, or a custom env (see clink env)").option("--base-url <url>", "Override Clink API base URL").option("--api-key <value>", "Secret key literal or env:CLINK_SECRET_KEY").option("--dry-run", "Print request metadata instead of executing Clink API writes");

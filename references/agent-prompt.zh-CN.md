@@ -66,12 +66,14 @@ webhook endpoint 管理已经支持 Secret Key API。Agent 必须优先使用：
 ```bash
 clink webhook endpoint ensure \
   --url <public-webhook-url> \
-  --events core \
+  --events commerce \
   --save-secret \
   --json
 ```
 
-`--events core` 使用事件名而不是 Dashboard 数字 code。`--save-secret` 会把 signing key 保存到 CLI profile；需要写入外部平台 Secret 时才使用 `--show-secret` 读取明文。
+完整收费/订阅默认使用 `commerce`；仅一次性 Checkout 使用 `checkout,disputes`；订阅最低集合是 `checkout,subscriptions,disputes`；需要同步保存的支付方式时增加 `payment-methods` 或使用 `commerce`。`ensure` 会用运行时 `GET /webhook/events` 校验事件并默认合并已有集合；只有明确允许替换和删除时才使用 `--allow-remove-events`。稳定 `commerce` 固定为 31 个事件，未来的 `payment_method.deleted` 只能通过动态 `all` 或显式事件使用。
+
+`core` 只用于向后兼容/最小演示，固定六个事件：`session.complete`、`order.succeeded`、`order.failed`、`refund.succeeded`、`subscription.created`、`invoice.paid`。警告：它遗漏 `subscription.cancelled`、`subscription.past_due`、`subscription.updated.*`、`invoice.open/void`、`dispute.*`、`refund.failed` 和 `session.expired`；完整收费接入必须迁移到 `commerce`。`--save-secret` 会把 signing key 保存到 CLI profile；需要写入外部平台 Secret 时才使用 `--show-secret` 读取明文。
 
 如果普通安装拿到的 CLI 过旧，不支持 `auth secret set`，请重新安装/更新最新 CLI 后再继续。不要因为旧 CLI 缺少能力就直接把 webhook 配置交给用户。
 
@@ -187,7 +189,7 @@ clink catalog import --file ./clink-catalog.json --mapping-file ./.clink/catalog
 - 先在 agent 环境安装项目内 CLI，并确认 `clink webhook endpoint ensure --help` 支持 `--show-secret` 和 `--sync-env-file`。
 - 使用平台已配置的 `CLINK_SECRET_KEY`，或在受控的一次性命令环境里让用户只提供 `CLINK_SECRET_KEY`，运行 `clink auth secret set --api-key env:CLINK_SECRET_KEY --env sandbox`。
 - 部署包含 webhook route 的版本，拿到公网 HTTPS webhook URL。
-- 运行 `clink webhook endpoint ensure --url <public-webhook-url>/api/clink/webhook --events core --save-secret --show-secret --json`。
+- 运行 `clink webhook endpoint ensure --url <public-webhook-url>/api/clink/webhook --events commerce --save-secret --show-secret --json`。
 - agent 如果有平台 Secret 写入能力，必须自己把返回或轮换得到的 signing key 写入平台后端 Secret：`CLINK_WEBHOOK_SIGNING_KEY`，然后重新发布/重启后端。
 - 只有当平台不允许 agent 写入 Secret、也没有可用平台 Secret API 时，才把“请用户把这一个 signing key 写入平台后端 Secret 并重新发布”列为阻塞的人类步骤，并明确说明这是平台写入权限限制，不是 Clink CLI 能力缺失。
 
@@ -200,7 +202,7 @@ clink catalog import --file ./clink-catalog.json --mapping-file ./.clink/catalog
 ```bash
 clink webhook endpoint ensure \
   --url https://example.com/api/clink/webhook \
-  --events core \
+  --events commerce \
   --save-secret \
   --sync-env-file .env.local \
   --json
@@ -211,7 +213,7 @@ clink webhook endpoint ensure \
 如果当前环境是低代码编辑器/云 IDE/sandbox，且 agent 有写入平台 Secret 的工具或 API，请优先执行完整自动流程：
 
 1. 部署或发布包含 webhook endpoint 的站点，拿到公网 HTTPS URL。
-2. 运行 `clink webhook endpoint ensure --events core --save-secret --show-secret --json`。
+2. 运行 `clink webhook endpoint ensure --url <public-webhook-url> --events commerce --save-secret --show-secret --json`。
 3. 从命令输出中读取明文 signing key，写入平台 Secret。
 4. 重新部署/重启服务，让 webhook handler 使用最新 Secret。
 5. 使用 `clink webhook simulate` 或等价方式验证 webhook 返回 200。
@@ -222,6 +224,8 @@ clink webhook endpoint ensure \
 
 ## 验证
 
+Webhook handler 必须先对未经修改的 raw body 验签，再 JSON.parse/normalize；canonical 信封使用 `event_` ID、`object: "event"`、Unix 毫秒整数 `created`、对象形式的 `data.object`、Invoice `items`，且默认没有外层 `livemode`。非法结构和未知事件必须返回非 2xx，重复投递按 `event.id` 去重。摊平格式只允许显式 `--fixture-profile legacy`，并标记 deprecated。
+
 推荐验证顺序：
 
 1. 本地测试。
@@ -230,6 +234,8 @@ clink webhook endpoint ensure \
 4. `clink smoke-test --webhook-url <public-webhook-url>/api/clink/webhook --json`。
 5. 创建真实 sandbox checkout session。
 6. 如需确认真实付款 webhook，打开 `checkoutUrl` 并完成 sandbox 测试支付。
+
+`clink webhook fixture`、`clink webhook simulate` 和本地 replay 只验证本地 canonical 契约，不是真实 Clink sandbox Merchant Webhook UAT。只有观察到真实 Clink 到 endpoint 的投递后，才能报告真实 webhook E2E。
 
 webhook handler 必须使用 `merchantReferenceId` + `sessionId` 双重匹配本地订单；如果两个字段指向不同本地订单，必须拒绝、隔离或升级处理，不能只依赖其中一个字段。
 
