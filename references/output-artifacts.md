@@ -77,14 +77,14 @@ A strong merchant skill for generic agent integration output should usually incl
 
 ## Clink MCP Agent Artifacts
 
-When UCP, Wallet, Browser Pay, or MCP OAuth is in scope, also produce:
+When UCP, Wallet, Browser Pay, or MCP OAuth is in scope, also produce these named artifacts:
 
-- MCP endpoint and OAuth/PKCE registration checklist
-- per-user token storage and scope matrix
-- Wallet and purchase-instruction action map
-- UCP Checkout and digital-delivery flow
-- Browser Pay credential, merchant-observation, and `confirm_result` contract
-- Operation and `next_action` recovery matrix with fail-closed timeout handling
+- `mcp_oauth_pkce_checklist` — MCP endpoint and OAuth/PKCE registration checklist
+- `mcp_token_scope_matrix` — per-user token storage and scope matrix
+- `wallet_instruction_action_map` — Wallet and purchase-instruction action map
+- `ucp_checkout_delivery_flow` — UCP Checkout and digital-delivery flow
+- `browser_pay_contract` — Browser Pay credential, merchant-observation, and `confirm_result` contract
+- `operation_recovery_matrix` — Operation and `next_action` recovery matrix with fail-closed timeout handling
 
 ## Validation Artifacts
 

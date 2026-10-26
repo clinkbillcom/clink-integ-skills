@@ -77,7 +77,9 @@ Merchant skill for generic agent integration must preserve the Clink MCP operati
 - read instructions with `list_spendable_instructions`; create one with `create_purchase_instruction` when the amount is not already covered
 - with a stated budget, match or create a covering instruction before the first discovery or checkout call; without one, obtain the authoritative total first
 - instruction amount limits are major-unit decimal strings
-- activation is a user-device step; read `get_instruction` for the authoritative status and read the Operation again after handing over the redirect
+- activation is a user-device step: hand over the `start_instruction_action` redirect, then call
+  `get_instruction` for the authoritative instruction status. Do not call `get_operation` for this
+  URL handoff; use `get_operation` only for flows that actually return an Operation identifier.
 
 ### Refunds
 

@@ -285,11 +285,13 @@ const moduleExpectations = [
       "get_order",
       "get_account_state",
       "start_payment_method_action",
+      "start_agent_pay_registration",
       "prepare_payment",
       "execute_payment",
       "create_purchase_instruction",
       "list_spendable_instructions",
       "start_instruction_action",
+      "get_instruction",
       "start_refund",
       "execute_refund",
       "get_refund",
@@ -297,6 +299,10 @@ const moduleExpectations = [
       "get_credential",
       "confirm_result",
       "merchantUrl",
+      "credential.orderId",
+      "credential.paymentExecutionDetailId",
+      "resources.payment_order_id",
+      "resources.payment_execution_detail_id",
       "NOT_SUBMITTED",
       "get_operation",
       "next_action",
@@ -304,6 +310,9 @@ const moduleExpectations = [
       "CONFIRM",
       "REDIRECT_USER",
       "SETUP_REQUIRED",
+      "PURCHASE_INSTRUCTION",
+      "ACTIVE",
+      "PENDING",
       "POLL_OPERATION",
       "WAIT_OPERATION",
       "CONTACT_SUPPORT",
@@ -317,7 +326,8 @@ const moduleExpectations = [
       "clink-payment-skill",
       "clink-cli",
       "customerApiKey",
-      "CLINK_CUSTOMER_API_KEY"
+      "CLINK_CUSTOMER_API_KEY",
+      "start_visa_registration"
     ]
   },
   {
@@ -573,7 +583,13 @@ const moduleExpectations = [
       "CLI environment checklist",
       "elements_frontend_checklist",
       "elements_brand_theme_plan",
-      "promotion_code_ui_contract"
+      "promotion_code_ui_contract",
+      "mcp_oauth_pkce_checklist",
+      "mcp_token_scope_matrix",
+      "wallet_instruction_action_map",
+      "ucp_checkout_delivery_flow",
+      "browser_pay_contract",
+      "operation_recovery_matrix"
     ]
   },
   {

@@ -77,7 +77,7 @@ The operating ruleset lives on the server, not in this file:
 | --- | --- |
 | Catalog | `list_catalog_merchants`, `parse_product_item`, `search_catalog` (compatibility), `discover_catalog`, `get_product` |
 | UCP Commerce | `create_checkout`, `update_checkout`, `complete_checkout`, `get_order`, `wait_for_digital_delivery` |
-| Clink account | `get_account_state`, `start_payment_method_action`, `start_agent_pay_registration` (legacy `start_visa_registration`), `list_spendable_instructions` |
+| Clink account | `get_account_state`, `start_payment_method_action`, `start_agent_pay_registration`, `list_spendable_instructions` |
 | Clink instructions | `create_purchase_instruction`, `get_instruction`, `start_instruction_action` |
 | Clink Direct/Session payment | `prepare_payment`, `execute_payment` |
 | Clink refund | `get_refund`, `start_refund`, `execute_refund` |
@@ -196,15 +196,26 @@ The flow is `get_credential` → fill the merchant's card form → observe the m
   unchanged. Never log, store, repeat, or send card fields anywhere except the merchant's own form.
 - `SETUP_REQUIRED` / `DEFAULT_CARD` carries `wallet_cards`. Show brand and last four so the user
   chooses, then repeat `get_credential` with the same checkout facts and that `paymentInstrumentId`.
+- `SETUP_REQUIRED` / `PURCHASE_INSTRUCTION` means credential issuance needs an authorized purchase
+  instruction. Complete the indicated purchase-instruction action on the user's device, then read
+  `get_instruction` until the instruction is `ACTIVE`; a newly created or `PENDING` instruction does
+  not authorize spending. After it is active, repeat `get_credential` with the original checkout
+  facts and without the setup action identifier.
 - `REDIRECT_USER` with `actor: "USER_DEVICE_ONLY"` (`PASSKEY`, `PAYMENT_METHOD_SETUP`) is the user's own
   device action: hand over `redirect_url`, then read the setup Operation with `get_operation`. Once it
   completes, repeat `get_credential` with the original checkout facts and without the setup
   `operationId`. Opening a link is not proof that authorization completed.
 - Credential issuance is not payment. `SUCCEEDED` on the issuing Operation only proves a credential was
   issued, and a later `get_operation` read returns that issuance state without any credential.
-- Report the observed merchant outcome with `confirm_result`, using `orderId`,
-  `paymentExecutionDetailId`, and the issuing `operationId` from that same issuance. It records an
-  agent report: it never executes a payment and never independently verifies merchant success.
+- Preserve the issuing response's `operation_id` as the `operationId` for `confirm_result`. Prefer
+  `credential.orderId` and `credential.paymentExecutionDetailId` when the already-decrypted
+  credential carries them; otherwise use the issuance response's
+  `resources.payment_order_id` and `resources.payment_execution_detail_id`, mapping them to
+  `orderId` and `paymentExecutionDetailId`. The encrypted `credential.key` /
+  `credential.payload` response therefore requires the `resources.*` fallback after platform-side
+  decryption. A later `get_operation` read omits the credential, so never expect it to recover these
+  identifiers. It records an agent report: it never executes a payment and never independently
+  verifies merchant success.
 - `outcome` is `SUCCEEDED` (the merchant explicitly confirmed), `FAILED` (the merchant showed failure
   after submission), `NOT_SUBMITTED` (the card was never submitted; valid before clicking Pay), or
   `UNKNOWN` (submitted, result undeterminable). Report success only on explicit merchant confirmation.
